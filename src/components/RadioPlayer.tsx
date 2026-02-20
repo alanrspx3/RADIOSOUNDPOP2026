@@ -104,7 +104,7 @@ export default function RadioPlayer() {
           ...prev,
           status: 'online', // Assume online if we can't fetch but stream might work
           songtitle: 'Sintonizando...',
-          artist: 'Rádio Fox'
+          artist: 'Rádio Sound POP'
         }));
       }
     };
@@ -300,7 +300,7 @@ export default function RadioPlayer() {
 
         {/* Footer Info */}
         <p className="text-center mt-8 text-white/20 text-[10px] uppercase tracking-[0.3em] font-medium">
-          Powered by Fox Streaming
+          Powered by Radio Sound POP
         </p>
       </motion.div>
     </div>
