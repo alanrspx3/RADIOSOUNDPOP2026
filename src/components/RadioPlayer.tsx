@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2 } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
 
 const STREAM_URL = 'https://streaming.fox.srv.br:8150/;';
 const METADATA_URL = '/api/radio-stats';
@@ -24,6 +25,8 @@ export default function RadioPlayer() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -90,7 +93,7 @@ export default function RadioPlayer() {
           const [artist, ...songParts] = data.songtitle.split(' - ');
           setMetadata({
             songtitle: songParts.join(' - ') || data.songtitle,
-            artist: artist || 'Rádio Fox',
+            artist: artist || 'SoundPop',
             status: 'online',
             // Cover art usually requires a separate API like iTunes or Spotify search
             // based on the artist and song title.
@@ -104,7 +107,7 @@ export default function RadioPlayer() {
           ...prev,
           status: 'online', // Assume online if we can't fetch but stream might work
           songtitle: 'Sintonizando...',
-          artist: 'Rádio Sound POP'
+          artist: 'SoundPop'
         }));
       }
     };
@@ -136,6 +139,25 @@ export default function RadioPlayer() {
     localStorage.setItem('radio_liked', String(newState));
   };
 
+  const getAiInsight = async () => {
+    if (!metadata.songtitle || metadata.songtitle === 'Carregando...') return;
+    
+    setIsAiLoading(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Me conte uma curiosidade rápida, inédita e interessante (máximo 2 frases) sobre a música ou artista: "${metadata.artist} - ${metadata.songtitle}". Tente não repetir fatos óbvios. Seja descontraído e use emojis.`,
+      });
+      setAiInsight(response.text || "Não consegui encontrar curiosidades agora. 🎵");
+    } catch (error) {
+      console.error("Gemini error:", error);
+      setAiInsight("Ops! Ocorreu um erro ao buscar curiosidades. 🎸");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-[#0a0502] overflow-hidden relative">
       {/* Atmospheric Background */}
@@ -153,19 +175,10 @@ export default function RadioPlayer() {
         <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl shadow-black/50">
           
           {/* Header */}
-          <div className="flex justify-between items-center mb-8">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${metadata.status === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/40">
-                {metadata.status === 'online' ? 'Ao Vivo' : 'Offline'}
-              </span>
-            </div>
-            <button 
-              onClick={toggleLike}
-              className={`transition-colors duration-300 ${isLiked ? 'text-rose-500' : 'text-white/20 hover:text-white/40'}`}
-            >
-              <Heart size={20} fill={isLiked ? "currentColor" : "none"} />
-            </button>
+          <div className="flex justify-center items-center mb-8">
+            <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
+              RADIO ONLINE
+            </h1>
           </div>
 
           {/* Album Art / Visualizer */}
@@ -205,19 +218,42 @@ export default function RadioPlayer() {
                 onClick={togglePlay}
                 className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white hover:scale-110 transition-transform"
               >
-                {isLoading ? (
-                  <Loader2 className="animate-spin" size={32} />
-                ) : isPlaying ? (
-                  <Pause size={32} fill="currentColor" />
-                ) : (
-                  <Play size={32} fill="currentColor" className="ml-1" />
-                )}
+                <AnimatePresence mode="wait">
+                  {isLoading ? (
+                    <motion.div
+                      key="loader"
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                    >
+                      <Loader2 className="animate-spin" size={32} />
+                    </motion.div>
+                  ) : isPlaying ? (
+                    <motion.div
+                      key="pause"
+                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    >
+                      <Pause size={32} fill="currentColor" />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="play"
+                      initial={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    >
+                      <Play size={32} fill="currentColor" className="ml-1" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </button>
             </div>
           </div>
 
           {/* Info */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-8 relative group/info">
             <motion.h2 
               key={metadata.songtitle}
               initial={{ y: 10, opacity: 0 }}
@@ -230,10 +266,54 @@ export default function RadioPlayer() {
               key={metadata.artist}
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 0.5 }}
-              className="text-sm text-white/50 font-medium tracking-wide uppercase"
+              className="text-sm text-white/50 font-medium tracking-wide uppercase flex items-center justify-center gap-2"
             >
-              {metadata.artist || 'Rádio Fox'}
+              {metadata.artist || 'SoundPop'}
+              <button 
+                onClick={getAiInsight}
+                disabled={isAiLoading}
+                className="p-1 rounded-full hover:bg-white/10 transition-colors text-orange-500/50 hover:text-orange-500 disabled:opacity-50"
+                title="Curiosidade AI"
+              >
+                {isAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              </button>
             </motion.p>
+
+            {/* AI Insight Tooltip/Overlay */}
+            <AnimatePresence>
+              {aiInsight && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute top-full left-0 right-0 mt-4 p-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl text-xs text-white/80 leading-relaxed shadow-xl z-20"
+                >
+                  <button 
+                    onClick={() => setAiInsight(null)}
+                    className="absolute top-2 right-2 text-white/40 hover:text-white p-1"
+                  >
+                    ×
+                  </button>
+                  <div className="pr-4">
+                    {aiInsight}
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-white/5 flex justify-end">
+                    <button 
+                      onClick={getAiInsight}
+                      disabled={isAiLoading}
+                      className="flex items-center gap-1.5 text-[10px] font-bold text-orange-500 hover:text-orange-400 transition-colors disabled:opacity-50"
+                    >
+                      {isAiLoading ? (
+                        <Loader2 size={10} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={10} />
+                      )}
+                      OUTRA CURIOSIDADE
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Progress Bar (Fake) */}
@@ -285,23 +365,66 @@ export default function RadioPlayer() {
                 onClick={togglePlay}
                 className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform active:scale-95"
               >
-                {isLoading ? (
-                  <Loader2 className="animate-spin" size={20} />
-                ) : isPlaying ? (
-                  <Pause size={20} fill="currentColor" />
-                ) : (
-                  <Play size={20} fill="currentColor" className="ml-0.5" />
-                )}
+                <AnimatePresence mode="wait">
+                  {isLoading ? (
+                    <motion.div
+                      key="loader-small"
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                    >
+                      <Loader2 className="animate-spin" size={20} />
+                    </motion.div>
+                  ) : isPlaying ? (
+                    <motion.div
+                      key="pause-small"
+                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    >
+                      <Pause size={20} fill="currentColor" />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="play-small"
+                      initial={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    >
+                      <Play size={20} fill="currentColor" className="ml-0.5" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </button>
             </div>
           </div>
 
         </div>
 
-        {/* Footer Info */}
-        <p className="text-center mt-8 text-white/20 text-[10px] uppercase tracking-[0.3em] font-medium">
-          Powered by Radio Sound POP
-        </p>
+        {/* Footer Info & Sponsored Links */}
+        <div className="mt-8 space-y-6">
+          <div className="space-y-4">
+            <h1 className="text-center text-[12px] uppercase tracking-[0.4em] font-black text-white">
+              PARCEIROS
+            </h1>
+            
+            <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-2 px-4">
+              <a href="https://foxsolucoes.com/streaming-de-audio" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Streaming de audio</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://kangaroohost.com.br/hospedagem-de-site" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Hospedagem de sites</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo do bicho online</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://coimbraendlich.com.br/advogado-online" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Advogado Online</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://danferapida.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">danfe online</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://playbicho.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo Do Bicho</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://spotbichos.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">jogo do bicho online</a>
+            </div>
+          </div>
+        </div>
       </motion.div>
     </div>
   );
