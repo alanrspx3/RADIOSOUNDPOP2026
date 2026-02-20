@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2, Sparkles, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -36,6 +36,9 @@ export default function RadioPlayer() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [lyrics, setLyrics] = useState<string | null>(null);
+  const [showLyrics, setShowLyrics] = useState(false);
+  const [isLyricsLoading, setIsLyricsLoading] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -123,6 +126,10 @@ export default function RadioPlayer() {
             cover: coverUrl
           });
 
+          // Reset lyrics when song changes
+          setLyrics(null);
+          setShowLyrics(false);
+
           // Update History
           setHistory(prev => {
             const lastItem = prev[0];
@@ -208,6 +215,26 @@ export default function RadioPlayer() {
     }
   };
 
+  const fetchLyrics = async () => {
+    if (!metadata.songtitle || !metadata.artist || metadata.songtitle === 'Carregando...') return;
+    
+    setIsLyricsLoading(true);
+    try {
+      const response = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`);
+      const data = await response.json();
+      if (data.lyrics) {
+        setLyrics(data.lyrics);
+      } else {
+        setLyrics("Letra não encontrada para esta música. 😕");
+      }
+    } catch (error) {
+      console.error("Lyrics fetch error:", error);
+      setLyrics("Erro ao carregar a letra. Tente novamente mais tarde. 🛠️");
+    } finally {
+      setIsLyricsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-[#0a0502] overflow-hidden relative">
       {/* Atmospheric Background */}
@@ -226,17 +253,34 @@ export default function RadioPlayer() {
           
           {/* Header */}
           <div className="flex justify-between items-center mb-8">
-            <button 
-              onClick={() => setShowHistory(!showHistory)}
-              className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
-              title="Histórico"
-            >
-              <Music size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => {
+                  setShowHistory(!showHistory);
+                  if (showLyrics) setShowLyrics(false);
+                }}
+                className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+                title="Histórico"
+              >
+                <Music size={18} />
+              </button>
+              <button 
+                onClick={() => {
+                  const nextShowLyrics = !showLyrics;
+                  setShowLyrics(nextShowLyrics);
+                  if (showHistory) setShowHistory(false);
+                  if (nextShowLyrics && !lyrics) fetchLyrics();
+                }}
+                className={`p-2 rounded-full transition-colors ${showLyrics ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+                title="Letra"
+              >
+                <FileText size={18} />
+              </button>
+            </div>
             <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
               RADIO ONLINE
             </h1>
-            <div className="w-9" /> {/* Spacer for balance */}
+            <div className="w-18" /> {/* Spacer for balance */}
           </div>
 
           {/* Album Art / Visualizer */}
@@ -521,6 +565,38 @@ export default function RadioPlayer() {
                     ))
                   ) : (
                     <p className="text-[10px] text-white/20 italic">Nenhuma música no histórico ainda.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Lyrics Section */}
+          <AnimatePresence>
+            {showLyrics && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden mt-8 pt-8 border-t border-white/5"
+              >
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Letra da Música</h3>
+                  {isLyricsLoading && <Loader2 size={12} className="animate-spin text-white/20" />}
+                </div>
+                <div className="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                  {isLyricsLoading ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="h-3 w-3/4 bg-white/5 rounded animate-pulse" />
+                      <div className="h-3 w-1/2 bg-white/5 rounded animate-pulse" />
+                      <div className="h-3 w-2/3 bg-white/5 rounded animate-pulse" />
+                    </div>
+                  ) : lyrics ? (
+                    <pre className="text-xs text-white/60 whitespace-pre-wrap font-sans leading-relaxed">
+                      {lyrics}
+                    </pre>
+                  ) : (
+                    <p className="text-[10px] text-white/20 italic">Clique no ícone de letra para carregar.</p>
                   )}
                 </div>
               </motion.div>
