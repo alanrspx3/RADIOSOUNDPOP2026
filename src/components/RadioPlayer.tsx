@@ -392,9 +392,30 @@ export default function RadioPlayer() {
                 transition={{ duration: 1, ease: "linear" }}
               />
             </div>
-            <div className="flex justify-between mt-2">
+            <div className="flex justify-between items-center mt-2">
+              <div className="flex items-center gap-2">
+                <div className="flex items-end gap-[2px] h-2.5">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      animate={isPlaying ? {
+                        height: ["30%", "100%", "30%"],
+                      } : { height: "30%" }}
+                      transition={{
+                        duration: 0.5,
+                        repeat: Infinity,
+                        delay: i * 0.15,
+                        ease: "easeInOut",
+                      }}
+                      className="w-[2px] bg-orange-500 rounded-full"
+                    />
+                  ))}
+                </div>
+                <span className="text-[10px] font-bold text-orange-500 uppercase tracking-[0.15em]">
+                  {isPlaying ? 'Tocando agora' : 'Pronto para tocar'}
+                </span>
+              </div>
               <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Live Stream</span>
-              <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">On Air</span>
             </div>
           </div>
 
