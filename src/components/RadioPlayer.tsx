@@ -14,6 +14,13 @@ interface RadioMetadata {
   status: 'online' | 'offline';
 }
 
+interface HistoryItem {
+  songtitle: string;
+  artist: string;
+  cover?: string;
+  timestamp: number;
+}
+
 export default function RadioPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(80);
@@ -27,6 +34,8 @@ export default function RadioPlayer() {
   const [progress, setProgress] = useState(0);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -90,13 +99,45 @@ export default function RadioPlayer() {
         // Shoutcast JSON structure varies, but usually it's something like:
         // { "songtitle": "Artist - Song", ... }
         if (data && data.songtitle) {
-          const [artist, ...songParts] = data.songtitle.split(' - ');
+          const [artistName, ...songParts] = data.songtitle.split(' - ');
+          const songTitle = songParts.join(' - ') || data.songtitle;
+          const artist = artistName || 'SoundPop';
+
+          // Fetch cover art from iTunes API
+          let coverUrl = undefined;
+          try {
+            const query = encodeURIComponent(`${artist} ${songTitle}`);
+            const itunesRes = await fetch(`https://itunes.apple.com/search?term=${query}&media=music&limit=1`);
+            const itunesData = await itunesRes.json();
+            if (itunesData.results && itunesData.results.length > 0) {
+              coverUrl = itunesData.results[0].artworkUrl100.replace('100x100', '600x600');
+            }
+          } catch (e) {
+            console.error('Error fetching cover:', e);
+          }
+
           setMetadata({
-            songtitle: songParts.join(' - ') || data.songtitle,
-            artist: artist || 'SoundPop',
+            songtitle: songTitle,
+            artist: artist,
             status: 'online',
-            // Cover art usually requires a separate API like iTunes or Spotify search
-            // based on the artist and song title.
+            cover: coverUrl
+          });
+
+          // Update History
+          setHistory(prev => {
+            const lastItem = prev[0];
+            if (lastItem && lastItem.songtitle === songTitle && lastItem.artist === artist) {
+              return prev;
+            }
+            const newItem: HistoryItem = {
+              songtitle: songTitle,
+              artist: artist,
+              cover: coverUrl,
+              timestamp: Date.now()
+            };
+            const updatedHistory = [newItem, ...prev].slice(0, 10);
+            localStorage.setItem('radio_history', JSON.stringify(updatedHistory));
+            return updatedHistory;
           });
         }
       } catch (error) {
@@ -127,10 +168,19 @@ export default function RadioPlayer() {
     }
   }, [isPlaying]);
 
-  // Like Persistence
+  // Like & History Persistence
   useEffect(() => {
     const savedLike = localStorage.getItem('radio_liked');
     if (savedLike === 'true') setIsLiked(true);
+
+    const savedHistory = localStorage.getItem('radio_history');
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to parse history", e);
+      }
+    }
   }, []);
 
   const toggleLike = () => {
@@ -175,10 +225,18 @@ export default function RadioPlayer() {
         <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl shadow-black/50">
           
           {/* Header */}
-          <div className="flex justify-center items-center mb-8">
+          <div className="flex justify-between items-center mb-8">
+            <button 
+              onClick={() => setShowHistory(!showHistory)}
+              className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+              title="Histórico"
+            >
+              <Music size={18} />
+            </button>
             <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
               RADIO ONLINE
             </h1>
+            <div className="w-9" /> {/* Spacer for balance */}
           </div>
 
           {/* Album Art / Visualizer */}
@@ -192,22 +250,31 @@ export default function RadioPlayer() {
                   exit={{ scale: 0.9, opacity: 0 }}
                   className="w-full h-full flex items-center justify-center bg-black/40"
                 >
-                  {/* Fallback Icon when no cover is available */}
-                  <div className="relative">
-                    <Music size={80} className="text-white/10" />
-                    {isPlaying && (
-                      <motion.div 
-                        animate={{ 
-                          scale: [1, 1.2, 1],
-                          opacity: [0.3, 0.6, 0.3]
-                        }}
-                        transition={{ repeat: Infinity, duration: 2 }}
-                        className="absolute inset-0 flex items-center justify-center"
-                      >
-                        <Radio size={40} className="text-orange-500/50" />
-                      </motion.div>
-                    )}
-                  </div>
+                  {metadata.cover ? (
+                    <img 
+                      src={metadata.cover} 
+                      alt={metadata.songtitle}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    /* Fallback Icon when no cover is available */
+                    <div className="relative">
+                      <Music size={80} className="text-white/10" />
+                      {isPlaying && (
+                        <motion.div 
+                          animate={{ 
+                            scale: [1, 1.2, 1],
+                            opacity: [0.3, 0.6, 0.3]
+                          }}
+                          transition={{ repeat: Infinity, duration: 2 }}
+                          className="absolute inset-0 flex items-center justify-center"
+                        >
+                          <Radio size={40} className="text-orange-500/50" />
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -399,6 +466,45 @@ export default function RadioPlayer() {
             </div>
           </div>
 
+          {/* Recently Played History */}
+          <AnimatePresence>
+            {showHistory && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden mt-8 pt-8 border-t border-white/5"
+              >
+                <h3 className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 mb-4">Tocadas Recentemente</h3>
+                <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                  {history.length > 0 ? (
+                    history.map((item, index) => (
+                      <div key={item.timestamp + index} className="flex items-center gap-3 group">
+                        <div className="w-10 h-10 rounded-lg bg-white/5 overflow-hidden flex-shrink-0">
+                          {item.cover ? (
+                            <img src={item.cover} alt="" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Music size={16} className="text-white/10" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-white/80 truncate">{item.songtitle}</p>
+                          <p className="text-[10px] text-white/40 truncate uppercase tracking-wider">{item.artist}</p>
+                        </div>
+                        <span className="text-[9px] text-white/20 font-mono">
+                          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[10px] text-white/20 italic">Nenhuma música no histórico ainda.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Footer Info & Sponsored Links */}
