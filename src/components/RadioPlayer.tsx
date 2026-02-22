@@ -138,10 +138,9 @@ export default function RadioPlayer() {
             cover: coverUrl
           });
 
-          // Reset lyrics when song changes
+          // Reset lyrics when song changes but keep panel state if it was open
           setLyrics(null);
-          setShowLyrics(false);
-
+          
           // Update History
           setHistory(prev => {
             const lastItem = prev[0];
@@ -227,15 +226,44 @@ export default function RadioPlayer() {
     }
   };
 
+  // Auto-fetch lyrics if panel is open
+  useEffect(() => {
+    if (showLyrics && !lyrics && metadata.songtitle && metadata.songtitle !== 'Carregando...') {
+      fetchLyrics();
+    }
+  }, [metadata.songtitle, showLyrics, lyrics]);
+
   const fetchLyrics = async () => {
     if (!metadata.songtitle || !metadata.artist || metadata.songtitle === 'Carregando...') return;
     
     setIsLyricsLoading(true);
+    setLyrics(null);
+    
     try {
+      // Try lyrics.ovh first
       const response = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`);
       const data = await response.json();
+      
       if (data.lyrics) {
         setLyrics(data.lyrics);
+        setIsLyricsLoading(false);
+        return;
+      }
+      
+      // Fallback to Gemini if API fails or lyrics not found
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const model = ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Encontre a letra da música "${metadata.songtitle}" do artista "${metadata.artist}". 
+        Retorne APENAS a letra da música, sem introduções ou comentários. 
+        Se não encontrar, diga apenas "Letra não encontrada".`,
+      });
+      
+      const aiResponse = await model;
+      const aiText = aiResponse.text;
+      
+      if (aiText && !aiText.includes("não encontrada")) {
+        setLyrics(aiText);
       } else {
         setLyrics("Letra não encontrada para esta música. 😕");
       }
@@ -305,12 +333,12 @@ export default function RadioPlayer() {
                   const nextShowLyrics = !showLyrics;
                   setShowLyrics(nextShowLyrics);
                   if (showHistory) setShowHistory(false);
-                  if (nextShowLyrics && !lyrics) fetchLyrics();
                 }}
-                className={`p-2 rounded-full transition-colors ${showLyrics ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all duration-300 ${showLyrics ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]' : 'text-white/40 hover:text-white/60 hover:bg-white/5'}`}
                 title="Letra"
               >
-                <FileText size={18} />
+                <FileText size={16} />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Letra</span>
               </button>
             </div>
             <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
@@ -348,11 +376,15 @@ export default function RadioPlayer() {
                       alt={metadata.songtitle}
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        // If image fails to load, remove the cover URL to trigger fallback UI
+                        setMetadata(prev => ({ ...prev, cover: undefined }));
+                      }}
                     />
                   ) : (
                     /* Fallback Icon when no cover is available */
                     <div className="relative">
-                      <Music size={80} className="text-white/10" />
+                      <Radio size={80} className="text-white/10" />
                       {isPlaying && (
                         <motion.div 
                           animate={{ 
@@ -362,7 +394,7 @@ export default function RadioPlayer() {
                           transition={{ repeat: Infinity, duration: 2 }}
                           className="absolute inset-0 flex items-center justify-center"
                         >
-                          <Radio size={40} className="text-orange-500/50" />
+                          <Sparkles size={40} className="text-orange-500/50" />
                         </motion.div>
                       )}
                     </div>
