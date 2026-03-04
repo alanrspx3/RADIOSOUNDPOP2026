@@ -32,6 +32,8 @@ export default function RadioPlayer() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -48,18 +50,35 @@ export default function RadioPlayer() {
     audioRef.current.volume = volume / 100;
     
     const handleCanPlay = () => setIsLoading(false);
+    const handleTimeUpdate = () => {
+      if (audioRef.current) {
+        setCurrentTime(audioRef.current.currentTime);
+        if (isFinite(audioRef.current.duration)) {
+          setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100);
+        }
+      }
+    };
+    const handleLoadedMetadata = () => {
+      if (audioRef.current) {
+        setDuration(audioRef.current.duration);
+      }
+    };
     const handleError = () => {
       setMetadata(prev => ({ ...prev, status: 'offline' }));
       setIsLoading(false);
     };
 
     audioRef.current.addEventListener('canplay', handleCanPlay);
+    audioRef.current.addEventListener('timeupdate', handleTimeUpdate);
+    audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
     audioRef.current.addEventListener('error', handleError);
 
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.removeEventListener('canplay', handleCanPlay);
+        audioRef.current.removeEventListener('timeupdate', handleTimeUpdate);
+        audioRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
         audioRef.current.removeEventListener('error', handleError);
         audioRef.current = null;
       }
@@ -138,9 +157,10 @@ export default function RadioPlayer() {
             cover: coverUrl
           });
 
-          // Reset lyrics when song changes but keep panel state if it was open
+          // Reset lyrics when song changes
           setLyrics(null);
-          
+          setShowLyrics(false);
+
           // Update History
           setHistory(prev => {
             const lastItem = prev[0];
@@ -176,15 +196,22 @@ export default function RadioPlayer() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fake Progress Bar Animation
+  // Progress Bar Animation (Fake for live streams, real for files)
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && (!duration || !isFinite(duration))) {
       const interval = setInterval(() => {
         setProgress(prev => (prev + 0.5) % 100);
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [isPlaying]);
+  }, [isPlaying, duration]);
+
+  const formatTime = (time: number) => {
+    if (isNaN(time) || time === Infinity) return '00:00';
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
 
   // Like & History Persistence
   useEffect(() => {
@@ -226,44 +253,15 @@ export default function RadioPlayer() {
     }
   };
 
-  // Auto-fetch lyrics if panel is open
-  useEffect(() => {
-    if (showLyrics && !lyrics && metadata.songtitle && metadata.songtitle !== 'Carregando...') {
-      fetchLyrics();
-    }
-  }, [metadata.songtitle, showLyrics, lyrics]);
-
   const fetchLyrics = async () => {
     if (!metadata.songtitle || !metadata.artist || metadata.songtitle === 'Carregando...') return;
     
     setIsLyricsLoading(true);
-    setLyrics(null);
-    
     try {
-      // Try lyrics.ovh first
       const response = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`);
       const data = await response.json();
-      
       if (data.lyrics) {
         setLyrics(data.lyrics);
-        setIsLyricsLoading(false);
-        return;
-      }
-      
-      // Fallback to Gemini if API fails or lyrics not found
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const model = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Encontre a letra da música "${metadata.songtitle}" do artista "${metadata.artist}". 
-        Retorne APENAS a letra da música, sem introduções ou comentários. 
-        Se não encontrar, diga apenas "Letra não encontrada".`,
-      });
-      
-      const aiResponse = await model;
-      const aiText = aiResponse.text;
-      
-      if (aiText && !aiText.includes("não encontrada")) {
-        setLyrics(aiText);
       } else {
         setLyrics("Letra não encontrada para esta música. 😕");
       }
@@ -333,12 +331,12 @@ export default function RadioPlayer() {
                   const nextShowLyrics = !showLyrics;
                   setShowLyrics(nextShowLyrics);
                   if (showHistory) setShowHistory(false);
+                  if (nextShowLyrics && !lyrics) fetchLyrics();
                 }}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all duration-300 ${showLyrics ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]' : 'text-white/40 hover:text-white/60 hover:bg-white/5'}`}
+                className={`p-2 rounded-full transition-colors ${showLyrics ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
                 title="Letra"
               >
-                <FileText size={16} />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Letra</span>
+                <FileText size={18} />
               </button>
             </div>
             <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
@@ -384,7 +382,7 @@ export default function RadioPlayer() {
                   ) : (
                     /* Fallback Icon when no cover is available */
                     <div className="relative">
-                      <Radio size={80} className="text-white/10" />
+                      <Music size={80} className="text-white/10" />
                       {isPlaying && (
                         <motion.div 
                           animate={{ 
@@ -394,7 +392,7 @@ export default function RadioPlayer() {
                           transition={{ repeat: Infinity, duration: 2 }}
                           className="absolute inset-0 flex items-center justify-center"
                         >
-                          <Sparkles size={40} className="text-orange-500/50" />
+                          <Radio size={40} className="text-orange-500/50" />
                         </motion.div>
                       )}
                     </div>
@@ -507,7 +505,7 @@ export default function RadioPlayer() {
             </AnimatePresence>
           </div>
 
-          {/* Progress Bar (Fake) */}
+          {/* Progress Bar */}
           <div className="mb-8 px-2">
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <motion.div 
@@ -517,6 +515,9 @@ export default function RadioPlayer() {
               />
             </div>
             <div className="flex justify-between items-center mt-3">
+              <div className="text-[10px] font-mono text-white/40 tracking-wider">
+                {formatTime(currentTime)}
+              </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-end gap-[2px] h-2.5">
                   {[0, 1, 2].map((i) => (
@@ -540,7 +541,9 @@ export default function RadioPlayer() {
                   {isPlaying ? 'Tocando agora' : 'Pronto para tocar'}
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-white/10 uppercase tracking-widest">Live Stream</span>
+              <div className="text-[10px] font-mono text-white/40 tracking-wider">
+                {isFinite(duration) ? formatTime(duration) : '00:00'}
+              </div>
             </div>
           </div>
 
