@@ -700,19 +700,25 @@ export default function RadioPlayer() {
             </h1>
             
             <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-2 px-4">
-              <a href="https://foxsolucoes.com/streaming-de-audio" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Streaming de audio</a>
+              <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo do bicho online</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://spotbichos.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">jogo do bicho online</a>
               <span className="text-white/20 text-[8px]">•</span>
               <a href="https://kangaroohost.com.br/hospedagem-de-site" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Hospedagem de sites</a>
               <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo do bicho online</a>
+              <a href="https://foxsolucoes.com/streaming-de-audio" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Streaming de audio</a>
               <span className="text-white/20 text-[8px]">•</span>
               <a href="https://coimbraendlich.com.br/advogado-online" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Advogado Online</a>
               <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://danferapida.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">danfe online</a>
+              <a href="http://casestarlink.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">CASER STARLINK</a>
               <span className="text-white/20 text-[8px]">•</span>
               <a href="https://playbicho.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo Do Bicho</a>
               <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://spotbichos.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">jogo do bicho online</a>
+              <a href="https://pontodobingo.com/" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">BINGO ONLINE</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://danferapida.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">danfe online</a>
+              <span className="text-white/20 text-[8px]">•</span>
+              <a href="https://hotelcity.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">HOTEL CITY</a>
             </div>
           </div>
         </div>
