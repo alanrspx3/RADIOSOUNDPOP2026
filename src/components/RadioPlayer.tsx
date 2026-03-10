@@ -555,14 +555,16 @@ export default function RadioPlayer() {
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => {
-                  setShowHistory(!showHistory);
-                  if (showLyrics) setShowLyrics(false);
+                  const nextShowLyrics = !showLyrics;
+                  setShowLyrics(nextShowLyrics);
+                  if (showHistory) setShowHistory(false);
                   if (showThemeSelector) setShowThemeSelector(false);
+                  if (nextShowLyrics && !lyrics) fetchLyrics();
                 }}
-                className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 ' + theme.text : theme.subtext + ' hover:' + theme.text}`}
-                title="Histórico"
+                className={`p-2 rounded-full transition-colors ${showLyrics ? 'bg-white/10 ' + theme.text : theme.subtext + ' hover:' + theme.text}`}
+                title="Letras"
               >
-                <Music size={18} />
+                <FileText size={18} />
               </button>
               <button 
                 onClick={() => {
@@ -846,19 +848,17 @@ export default function RadioPlayer() {
             </button>
           </div>
 
-          {/* Lyrics Button */}
+          {/* History Button (formerly Lyrics) */}
           <div className="flex justify-center mb-8">
             <button 
               onClick={() => {
-                const nextShowLyrics = !showLyrics;
-                setShowLyrics(nextShowLyrics);
-                if (showHistory) setShowHistory(false);
-                if (nextShowLyrics && !lyrics) fetchLyrics();
+                setShowHistory(!showHistory);
+                if (showLyrics) setShowLyrics(false);
               }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${showLyrics ? `bg-gradient-to-r ${theme.accent} text-white ${theme.glow}` : `bg-white/5 ${theme.subtext} hover:bg-white/10 hover:${theme.text}`}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${showHistory ? `bg-gradient-to-r ${theme.accent} text-white ${theme.glow}` : `bg-white/5 ${theme.subtext} hover:bg-white/10 hover:${theme.text}`}`}
             >
-              <FileText size={16} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Letras</span>
+              <Music size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Tocadas Recentemente</span>
             </button>
           </div>
 
