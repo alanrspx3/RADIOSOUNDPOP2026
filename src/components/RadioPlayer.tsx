@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
 const STREAM_URL = 'https://streaming.fox.srv.br:8150/;';
-const METADATA_URL = '/api/radio-stats';
+const METADATA_URL = 'https://streaming.fox.srv.br:2020/json/stream/8150';
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
 interface RadioMetadata {
   songtitle: string;
@@ -176,16 +177,17 @@ export default function RadioPlayer() {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        // Note: Direct fetch might fail due to CORS if the server doesn't allow it.
-        // In a real scenario, a proxy or a specific provider API would be used.
-        const response = await fetch(METADATA_URL);
+        // Use a CORS proxy to fetch directly from the radio server
+        // This avoids 404 errors if the backend API is not available (e.g. static hosting)
+        const response = await fetch(`${CORS_PROXY}${encodeURIComponent(METADATA_URL)}`);
         const data = await response.json();
         
-        // Shoutcast JSON structure varies, but usually it's something like:
-        // { "songtitle": "Artist - Song", ... }
-        if (data && data.songtitle) {
-          const [artistName, ...songParts] = data.songtitle.split(' - ');
-          const songTitle = songParts.join(' - ') || data.songtitle;
+        // Normalize the data format
+        const songtitle = data.nowplaying || data.songtitle;
+        
+        if (songtitle) {
+          const [artistName, ...songParts] = songtitle.split(' - ');
+          const songTitle = songParts.join(' - ') || songtitle;
           const artist = artistName || 'SoundPop';
 
           // Use cover art from API if available, otherwise fetch from iTunes/Deezer
@@ -348,7 +350,8 @@ export default function RadioPlayer() {
     
     setIsLyricsLoading(true);
     try {
-      const response = await fetch(`/api/lyrics?artist=${encodeURIComponent(metadata.artist)}&title=${encodeURIComponent(metadata.songtitle)}`);
+      const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`;
+      const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
       const data = await response.json();
       if (data.lyrics) {
         setLyrics(data.lyrics);
