@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2, Sparkles, FileText } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Heart, Music, Radio, Loader2, Sparkles, FileText, Palette, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -21,6 +21,65 @@ interface HistoryItem {
   timestamp: number;
 }
 
+type Theme = 'neon' | 'dark' | 'pastel' | 'ocean';
+
+const themes: Record<Theme, {
+  bg: string;
+  card: string;
+  accent: string;
+  text: string;
+  subtext: string;
+  border: string;
+  glow: string;
+  name: string;
+  iconColor: string;
+}> = {
+  neon: {
+    bg: 'bg-[#020202]',
+    card: 'bg-white/[0.05] backdrop-blur-3xl border-white/10',
+    accent: 'from-orange-400 via-orange-500 to-rose-600',
+    text: 'text-white',
+    subtext: 'text-white/50',
+    border: 'border-white/20',
+    glow: 'shadow-[0_0_25px_rgba(249,115,22,0.4)]',
+    name: 'Neon Vibrante',
+    iconColor: 'text-orange-400'
+  },
+  dark: {
+    bg: 'bg-[#050505]',
+    card: 'bg-zinc-900/40 backdrop-blur-xl border-zinc-800',
+    accent: 'from-zinc-400 to-zinc-600',
+    text: 'text-zinc-100',
+    subtext: 'text-zinc-500',
+    border: 'border-zinc-800',
+    glow: 'shadow-none',
+    name: 'Dark',
+    iconColor: 'text-zinc-400'
+  },
+  pastel: {
+    bg: 'bg-[#fdfcf0]',
+    card: 'bg-white/80 backdrop-blur-md border-purple-100',
+    accent: 'from-purple-300 to-pink-300',
+    text: 'text-purple-900',
+    subtext: 'text-purple-400',
+    border: 'border-purple-100',
+    glow: 'shadow-[0_10px_30px_rgba(216,180,254,0.3)]',
+    name: 'Pastel',
+    iconColor: 'text-purple-400'
+  },
+  ocean: {
+    bg: 'bg-[#001219]',
+    card: 'bg-white/[0.05] backdrop-blur-2xl border-cyan-900/30',
+    accent: 'from-cyan-400 to-blue-500',
+    text: 'text-cyan-50',
+    subtext: 'text-cyan-800/60',
+    border: 'border-cyan-900/30',
+    glow: 'shadow-[0_0_25px_rgba(34,211,238,0.15)]',
+    name: 'Ocean',
+    iconColor: 'text-cyan-400'
+  }
+};
+
 export default function RadioPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(80);
@@ -41,6 +100,10 @@ export default function RadioPlayer() {
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState<Theme>('neon');
+  const [showThemeSelector, setShowThemeSelector] = useState(false);
+
+  const theme = themes[currentTheme];
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -125,29 +188,32 @@ export default function RadioPlayer() {
           const songTitle = songParts.join(' - ') || data.songtitle;
           const artist = artistName || 'SoundPop';
 
-          // Fetch cover art from iTunes API with Deezer fallback
-          let coverUrl = undefined;
-          try {
-            const query = encodeURIComponent(`${artist} ${songTitle}`);
-            const itunesRes = await fetch(`https://itunes.apple.com/search?term=${query}&media=music&limit=1`);
-            const itunesData = await itunesRes.json();
-            
-            if (itunesData.results && itunesData.results.length > 0) {
-              coverUrl = itunesData.results[0].artworkUrl100.replace('100x100', '600x600');
-            } else {
-              // Fallback to Deezer (using a public proxy or direct if allowed)
-              try {
-                const deezerRes = await fetch(`https://api.deezer.com/search?q=artist:"${artist}" track:"${songTitle}"&limit=1`);
-                const deezerData = await deezerRes.json();
-                if (deezerData.data && deezerData.data.length > 0) {
-                  coverUrl = deezerData.data[0].album.cover_xl;
+          // Use cover art from API if available, otherwise fetch from iTunes/Deezer
+          let coverUrl = data.coverart || undefined;
+          
+          if (!coverUrl) {
+            try {
+              const query = encodeURIComponent(`${artist} ${songTitle}`);
+              const itunesRes = await fetch(`https://itunes.apple.com/search?term=${query}&media=music&limit=1`);
+              const itunesData = await itunesRes.json();
+              
+              if (itunesData.results && itunesData.results.length > 0) {
+                coverUrl = itunesData.results[0].artworkUrl100.replace('100x100', '600x600');
+              } else {
+                // Fallback to Deezer
+                try {
+                  const deezerRes = await fetch(`https://api.deezer.com/search?q=artist:"${artist}" track:"${songTitle}"&limit=1`);
+                  const deezerData = await deezerRes.json();
+                  if (deezerData.data && deezerData.data.length > 0) {
+                    coverUrl = deezerData.data[0].album.cover_xl;
+                  }
+                } catch (de) {
+                  console.log('Deezer fallback failed');
                 }
-              } catch (de) {
-                console.log('Deezer fallback failed or CORS blocked');
               }
+            } catch (e) {
+              console.error('Error fetching cover:', e);
             }
-          } catch (e) {
-            console.error('Error fetching cover:', e);
           }
 
           setMetadata({
@@ -161,22 +227,37 @@ export default function RadioPlayer() {
           setLyrics(null);
           setShowLyrics(false);
 
-          // Update History
-          setHistory(prev => {
-            const lastItem = prev[0];
-            if (lastItem && lastItem.songtitle === songTitle && lastItem.artist === artist) {
-              return prev;
-            }
-            const newItem: HistoryItem = {
-              songtitle: songTitle,
-              artist: artist,
-              cover: coverUrl,
-              timestamp: Date.now()
-            };
-            const updatedHistory = [newItem, ...prev].slice(0, 10);
-            localStorage.setItem('radio_history', JSON.stringify(updatedHistory));
-            return updatedHistory;
-          });
+          // Update History from API if available, otherwise use local logic
+          if (data.trackhistory && Array.isArray(data.trackhistory)) {
+            const apiHistory = data.trackhistory.map((item: string, index: number) => {
+              const [hArtist, ...hSongParts] = item.split(' - ');
+              const hSongTitle = hSongParts.join(' - ') || item;
+              return {
+                songtitle: hSongTitle,
+                artist: hArtist || 'SoundPop',
+                cover: data.covers && data.covers[index] ? data.covers[index] : undefined,
+                timestamp: Date.now() - (index + 1) * 300000 // Approximate time
+              };
+            });
+            setHistory(apiHistory);
+            localStorage.setItem('radio_history', JSON.stringify(apiHistory));
+          } else {
+            setHistory(prev => {
+              const lastItem = prev[0];
+              if (lastItem && lastItem.songtitle === songTitle && lastItem.artist === artist) {
+                return prev;
+              }
+              const newItem: HistoryItem = {
+                songtitle: songTitle,
+                artist: artist,
+                cover: coverUrl,
+                timestamp: Date.now()
+              };
+              const updatedHistory = [newItem, ...prev].slice(0, 10);
+              localStorage.setItem('radio_history', JSON.stringify(updatedHistory));
+              return updatedHistory;
+            });
+          }
         }
       } catch (error) {
         console.error('Metadata fetch error:', error);
@@ -213,10 +294,13 @@ export default function RadioPlayer() {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Like & History Persistence
+  // Like & History & Theme Persistence
   useEffect(() => {
     const savedLike = localStorage.getItem('radio_liked');
     if (savedLike === 'true') setIsLiked(true);
+
+    const savedTheme = localStorage.getItem('radio_theme') as Theme;
+    if (savedTheme && themes[savedTheme]) setCurrentTheme(savedTheme);
 
     const savedHistory = localStorage.getItem('radio_history');
     if (savedHistory) {
@@ -232,6 +316,12 @@ export default function RadioPlayer() {
     const newState = !isLiked;
     setIsLiked(newState);
     localStorage.setItem('radio_liked', String(newState));
+  };
+
+  const changeTheme = (newTheme: Theme) => {
+    setCurrentTheme(newTheme);
+    localStorage.setItem('radio_theme', newTheme);
+    setShowThemeSelector(false);
   };
 
   const getAiInsight = async () => {
@@ -258,7 +348,7 @@ export default function RadioPlayer() {
     
     setIsLyricsLoading(true);
     try {
-      const response = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`);
+      const response = await fetch(`/api/lyrics?artist=${encodeURIComponent(metadata.artist)}&title=${encodeURIComponent(metadata.songtitle)}`);
       const data = await response.json();
       if (data.lyrics) {
         setLyrics(data.lyrics);
@@ -274,24 +364,24 @@ export default function RadioPlayer() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-[#0a0502] overflow-hidden relative">
+    <div className={`min-h-screen flex items-center justify-center p-6 ${theme.bg} transition-colors duration-700 overflow-hidden relative`}>
       {/* Atmospheric Background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div 
           animate={isPlaying ? {
             scale: [1, 1.2, 1],
-            opacity: [0.2, 0.4, 0.2]
+            opacity: [0.1, 0.3, 0.1]
           } : {}}
           transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-orange-600/20 blur-[120px]" 
+          className={`absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full ${currentTheme === 'pastel' ? 'bg-purple-200/30' : currentTheme === 'ocean' ? 'bg-cyan-600/20' : 'bg-orange-600/20'} blur-[120px]`} 
         />
         <motion.div 
           animate={isPlaying ? {
             scale: [1, 1.1, 1],
-            opacity: [0.2, 0.3, 0.2]
+            opacity: [0.1, 0.2, 0.1]
           } : {}}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/20 blur-[100px]" 
+          className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full ${currentTheme === 'pastel' ? 'bg-pink-200/30' : currentTheme === 'ocean' ? 'bg-blue-900/20' : 'bg-purple-900/20'} blur-[100px]`} 
         />
       </div>
 
@@ -300,17 +390,52 @@ export default function RadioPlayer() {
         animate={{ opacity: 1, y: 0 }}
         className="relative z-10 w-full max-w-md"
       >
+        {/* Theme Selector Popover */}
+        <AnimatePresence>
+          {showThemeSelector && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 10 }}
+              className={`absolute top-0 left-0 right-0 z-50 p-4 rounded-3xl ${theme.card} border ${theme.border} shadow-2xl mb-4`}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h3 className={`text-xs font-bold uppercase tracking-widest ${theme.text}`}>Escolha o Tema</h3>
+                <button onClick={() => setShowThemeSelector(false)} className={`${theme.subtext} hover:${theme.text}`}>
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {(Object.keys(themes) as Theme[]).map((tKey) => (
+                  <button
+                    key={tKey}
+                    onClick={() => changeTheme(tKey)}
+                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${
+                      currentTheme === tKey 
+                        ? `bg-white/10 ${theme.border} ${currentTheme === 'neon' ? 'shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}` 
+                        : `bg-transparent border-transparent hover:bg-white/5`
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-gradient-to-br ${themes[tKey].accent}`} />
+                    <span className={`text-xs font-medium ${theme.text}`}>{themes[tKey].name}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Player Card */}
         <motion.div 
           animate={isPlaying ? {
-            boxShadow: [
-              "0 0 20px rgba(249, 115, 22, 0.1)",
-              "0 0 40px rgba(249, 115, 22, 0.2)",
-              "0 0 20px rgba(249, 115, 22, 0.1)"
+            boxShadow: currentTheme === 'dark' ? 'none' : [
+              currentTheme === 'neon' ? "0 0 30px rgba(249, 115, 22, 0.1)" : "0 0 20px rgba(249, 115, 22, 0.05)",
+              currentTheme === 'neon' ? "0 0 60px rgba(249, 115, 22, 0.2)" : "0 0 40px rgba(249, 115, 22, 0.1)",
+              currentTheme === 'neon' ? "0 0 30px rgba(249, 115, 22, 0.1)" : "0 0 20px rgba(249, 115, 22, 0.05)"
             ]
           } : {}}
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          className="bg-white/[0.03] backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl shadow-black/50"
+          className={`${theme.card} border ${theme.border} rounded-[2.5rem] p-8 shadow-2xl transition-all duration-500`}
         >
           
           {/* Header */}
@@ -320,53 +445,53 @@ export default function RadioPlayer() {
                 onClick={() => {
                   setShowHistory(!showHistory);
                   if (showLyrics) setShowLyrics(false);
+                  if (showThemeSelector) setShowThemeSelector(false);
                 }}
-                className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
+                className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-white/10 ' + theme.text : theme.subtext + ' hover:' + theme.text}`}
                 title="Histórico"
               >
                 <Music size={18} />
               </button>
               <button 
                 onClick={() => {
-                  const nextShowLyrics = !showLyrics;
-                  setShowLyrics(nextShowLyrics);
+                  setShowThemeSelector(!showThemeSelector);
                   if (showHistory) setShowHistory(false);
-                  if (nextShowLyrics && !lyrics) fetchLyrics();
+                  if (showLyrics) setShowLyrics(false);
                 }}
-                className={`p-2 rounded-full transition-colors ${showLyrics ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
-                title="Letra"
+                className={`p-2 rounded-full transition-colors ${showThemeSelector ? 'bg-white/10 ' + theme.text : theme.subtext + ' hover:' + theme.text}`}
+                title="Temas"
               >
-                <FileText size={18} />
+                <Palette size={18} />
               </button>
             </div>
-            <h1 className="text-[12px] uppercase tracking-[0.4em] font-black text-white/60">
+            <h1 className={`text-[12px] uppercase tracking-[0.4em] font-black ${theme.subtext}`}>
               RADIO ONLINE
             </h1>
-            <div className="w-18" /> {/* Spacer for balance */}
+            <div className="w-10" /> {/* Spacer for balance */}
           </div>
 
           {/* Album Art / Visualizer */}
           <div className="relative aspect-square mb-8 group">
             {/* Neon Pulse Ring */}
-            {isPlaying && (
+            {isPlaying && currentTheme !== 'dark' && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ 
-                  opacity: [0.2, 0.5, 0.2],
+                  opacity: currentTheme === 'neon' ? [0.2, 0.5, 0.2] : [0.1, 0.3, 0.1],
                   scale: [1, 1.05, 1],
                 }}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                className="absolute -inset-4 rounded-[2.5rem] border-2 border-orange-500/30 blur-md pointer-events-none"
+                className={`absolute -inset-4 rounded-[2.5rem] border-2 ${currentTheme === 'neon' ? 'border-orange-500/40' : theme.border} blur-md pointer-events-none`}
               />
             )}
-            <div className="absolute inset-0 bg-gradient-to-br from-orange-500/20 to-purple-600/20 rounded-3xl overflow-hidden shadow-2xl border border-white/5">
+            <div className={`absolute inset-0 bg-gradient-to-br ${theme.accent} opacity-20 rounded-3xl overflow-hidden shadow-2xl border ${theme.border}`}>
               <AnimatePresence mode="wait">
                 <motion.div 
                   key={metadata.songtitle}
                   initial={{ scale: 1.1, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.9, opacity: 0 }}
-                  className="w-full h-full flex items-center justify-center bg-black/40"
+                  className="w-full h-full flex items-center justify-center bg-black/20"
                 >
                   {metadata.cover ? (
                     <img 
@@ -375,14 +500,12 @@ export default function RadioPlayer() {
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
                       onError={(e) => {
-                        // If image fails to load, remove the cover URL to trigger fallback UI
                         setMetadata(prev => ({ ...prev, cover: undefined }));
                       }}
                     />
                   ) : (
-                    /* Fallback Icon when no cover is available */
                     <div className="relative">
-                      <Music size={80} className="text-white/10" />
+                      <Music size={80} className={`${theme.text} opacity-10`} />
                       {isPlaying && (
                         <motion.div 
                           animate={{ 
@@ -392,7 +515,7 @@ export default function RadioPlayer() {
                           transition={{ repeat: Infinity, duration: 2 }}
                           className="absolute inset-0 flex items-center justify-center"
                         >
-                          <Radio size={40} className="text-orange-500/50" />
+                          <Radio size={40} className={`${theme.iconColor} opacity-50`} />
                         </motion.div>
                       )}
                     </div>
@@ -405,7 +528,7 @@ export default function RadioPlayer() {
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/20 rounded-3xl">
               <button 
                 onClick={togglePlay}
-                className="w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white hover:scale-110 transition-transform"
+                className={`w-20 h-20 rounded-full bg-white/10 backdrop-blur-md border ${theme.border} flex items-center justify-center ${theme.text} hover:scale-110 transition-transform`}
               >
                 <AnimatePresence mode="wait">
                   {isLoading ? (
@@ -447,7 +570,7 @@ export default function RadioPlayer() {
               key={metadata.songtitle}
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
-              className="text-2xl font-semibold text-white mb-2 truncate px-4"
+              className={`text-2xl font-black tracking-tight ${theme.text} mb-2 truncate px-4`}
             >
               {metadata.songtitle}
             </motion.h2>
@@ -455,13 +578,13 @@ export default function RadioPlayer() {
               key={metadata.artist}
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 0.5 }}
-              className="text-sm text-white/50 font-medium tracking-wide uppercase flex items-center justify-center gap-2"
+              className={`text-[11px] uppercase tracking-[0.3em] font-bold ${theme.subtext} flex items-center justify-center gap-2`}
             >
               {metadata.artist || 'SoundPop'}
               <button 
                 onClick={getAiInsight}
                 disabled={isAiLoading}
-                className="p-1 rounded-full hover:bg-white/10 transition-colors text-orange-500/50 hover:text-orange-500 disabled:opacity-50"
+                className={`p-1 rounded-full hover:bg-white/10 transition-colors ${theme.subtext} hover:${theme.text} disabled:opacity-50`}
                 title="Curiosidade AI"
               >
                 {isAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -475,22 +598,22 @@ export default function RadioPlayer() {
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute top-full left-0 right-0 mt-4 p-4 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl text-xs text-white/80 leading-relaxed shadow-xl z-20"
+                  className={`absolute top-full left-0 right-0 mt-4 p-4 ${theme.card} border ${theme.border} rounded-2xl text-xs ${theme.text} opacity-90 leading-relaxed shadow-xl z-20 ${currentTheme === 'neon' ? theme.glow : ''}`}
                 >
                   <button 
                     onClick={() => setAiInsight(null)}
-                    className="absolute top-2 right-2 text-white/40 hover:text-white p-1"
+                    className={`absolute top-2 right-2 ${theme.subtext} hover:${theme.text} p-1`}
                   >
-                    ×
+                    <X size={14} />
                   </button>
-                  <div className="pr-4">
+                  <div className="pr-4 italic">
                     {aiInsight}
                   </div>
-                  <div className="mt-3 pt-3 border-t border-white/5 flex justify-end">
+                  <div className={`mt-3 pt-3 border-t ${theme.border} flex justify-end`}>
                     <button 
                       onClick={getAiInsight}
                       disabled={isAiLoading}
-                      className="flex items-center gap-1.5 text-[10px] font-bold text-orange-500 hover:text-orange-400 transition-colors disabled:opacity-50"
+                      className={`flex items-center gap-1.5 text-[10px] font-bold ${theme.iconColor} hover:opacity-80 transition-colors disabled:opacity-50`}
                     >
                       {isAiLoading ? (
                         <Loader2 size={10} className="animate-spin" />
@@ -507,15 +630,15 @@ export default function RadioPlayer() {
 
           {/* Progress Bar */}
           <div className="mb-8 px-2">
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className={`h-1.5 w-full ${currentTheme === 'neon' ? 'bg-white/10' : 'bg-white/5'} rounded-full overflow-hidden`}>
               <motion.div 
-                className="h-full bg-gradient-to-r from-orange-500 to-rose-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]"
+                className={`h-full bg-gradient-to-r ${theme.accent} ${theme.glow}`}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 1, ease: "linear" }}
               />
             </div>
             <div className="flex justify-between items-center mt-3">
-              <div className="text-[10px] font-mono text-white/40 tracking-wider">
+              <div className={`text-[10px] font-mono ${theme.subtext} tracking-wider`}>
                 {formatTime(currentTime)}
               </div>
               <div className="flex items-center gap-2">
@@ -525,33 +648,33 @@ export default function RadioPlayer() {
                       key={i}
                       animate={isPlaying ? {
                         height: ["30%", "100%", "30%"],
-                        backgroundColor: ["#f97316", "#fb923c", "#f97316"]
-                      } : { height: "30%", backgroundColor: "#f97316" }}
+                        opacity: [0.5, 1, 0.5]
+                      } : { height: "30%", opacity: 0.3 }}
                       transition={{
                         duration: 0.5,
                         repeat: Infinity,
                         delay: i * 0.15,
                         ease: "easeInOut",
                       }}
-                      className="w-[2px] rounded-full shadow-[0_0_5px_rgba(249,115,22,0.5)]"
+                      className={`w-[2px] rounded-full bg-gradient-to-t ${theme.accent}`}
                     />
                   ))}
                 </div>
-                <span className={`text-[10px] font-bold uppercase tracking-[0.15em] transition-colors duration-500 ${isPlaying ? 'text-orange-500 drop-shadow-[0_0_5px_rgba(249,115,22,0.5)]' : 'text-white/20'}`}>
+                <span className={`text-[10px] font-bold uppercase tracking-[0.15em] transition-colors duration-500 ${isPlaying ? theme.iconColor : theme.subtext}`}>
                   {isPlaying ? 'Tocando agora' : 'Pronto para tocar'}
                 </span>
               </div>
-              <div className="text-[10px] font-mono text-white/40 tracking-wider">
+              <div className={`text-[10px] font-mono ${theme.subtext} tracking-wider`}>
                 {isFinite(duration) ? formatTime(duration) : '00:00'}
               </div>
             </div>
           </div>
 
           {/* Controls */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 mb-8">
             <button 
               onClick={() => setIsMuted(!isMuted)}
-              className="text-white/40 hover:text-white transition-colors"
+              className={`${theme.subtext} hover:${theme.text} transition-colors`}
             >
               {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
             </button>
@@ -565,53 +688,77 @@ export default function RadioPlayer() {
                 onChange={(e) => setVolume(Number(e.target.value))}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               />
-              <div className="absolute inset-0 bg-white/5 rounded-full" />
+              <div className={`absolute inset-0 ${currentTheme === 'neon' ? 'bg-white/10' : 'bg-white/5'} rounded-full`} />
               <div 
-                className="absolute inset-y-0 left-0 bg-white/20 rounded-full transition-all"
+                className={`absolute inset-y-0 left-0 bg-gradient-to-r ${theme.accent} rounded-full transition-all`}
                 style={{ width: `${volume}%` }}
               />
               <div 
-                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 ${theme.text} rounded-full ${theme.glow} opacity-0 group-hover:opacity-100 transition-opacity`}
                 style={{ left: `calc(${volume}% - 6px)` }}
               />
             </div>
 
-            <div className="flex items-center gap-4">
-               <button 
-                onClick={togglePlay}
-                className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform active:scale-95"
-              >
-                <AnimatePresence mode="wait">
-                  {isLoading ? (
-                    <motion.div
-                      key="loader-small"
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.5 }}
-                    >
-                      <Loader2 className="animate-spin" size={20} />
-                    </motion.div>
-                  ) : isPlaying ? (
-                    <motion.div
-                      key="pause-small"
-                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                    >
-                      <Pause size={20} fill="currentColor" />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="play-small"
-                      initial={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                    >
-                      <Play size={20} fill="currentColor" className="ml-0.5" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </button>
+            <button 
+              onClick={togglePlay}
+              className={`w-12 h-12 rounded-full bg-gradient-to-br ${theme.accent} ${theme.text} flex items-center justify-center hover:scale-105 transition-transform active:scale-95 ${theme.glow}`}
+            >
+              <AnimatePresence mode="wait">
+                {isLoading ? (
+                  <motion.div
+                    key="loader-small"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                  >
+                    <Loader2 className="animate-spin" size={20} />
+                  </motion.div>
+                ) : isPlaying ? (
+                  <motion.div
+                    key="pause-small"
+                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                  >
+                    <Pause size={20} fill="currentColor" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="play-small"
+                    initial={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                  >
+                    <Play size={20} fill="currentColor" className="ml-0.5" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </button>
+          </div>
+
+          {/* Lyrics Button */}
+          <div className="flex justify-center mb-8">
+            <button 
+              onClick={() => {
+                const nextShowLyrics = !showLyrics;
+                setShowLyrics(nextShowLyrics);
+                if (showHistory) setShowHistory(false);
+                if (nextShowLyrics && !lyrics) fetchLyrics();
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${showLyrics ? `bg-gradient-to-r ${theme.accent} text-white ${theme.glow}` : `bg-white/5 ${theme.subtext} hover:bg-white/10 hover:${theme.text}`}`}
+            >
+              <FileText size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">Letras</span>
+            </button>
+          </div>
+
+          {/* Status Bar */}
+          <div className="flex items-center justify-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className={`h-1.5 w-1.5 rounded-full ${metadata.status === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
+              <span className={`text-[9px] font-bold uppercase tracking-[0.2em] ${theme.subtext}`}>
+                {metadata.status === 'online' ? 'Transmissão Estável' : 'Servidor Offline'}
+              </span>
             </div>
           </div>
 
@@ -622,34 +769,34 @@ export default function RadioPlayer() {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden mt-8 pt-8 border-t border-white/5"
+                className={`overflow-hidden mt-8 pt-8 border-t ${theme.border}`}
               >
-                <div className="bg-white/[0.02] rounded-2xl p-4 border border-white/5 backdrop-blur-md">
-                  <h3 className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 mb-4">Tocadas Recentemente</h3>
+                <div className={`${theme.card} bg-opacity-20 rounded-2xl p-4 border ${theme.border} backdrop-blur-md`}>
+                  <h3 className={`text-[10px] uppercase tracking-[0.2em] font-bold ${theme.subtext} mb-4`}>Tocadas Recentemente</h3>
                   <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                     {history.length > 0 ? (
                       history.map((item, index) => (
                         <div key={item.timestamp + index} className="flex items-center gap-3 group">
-                          <div className="w-10 h-10 rounded-lg bg-white/5 overflow-hidden flex-shrink-0 border border-white/5">
+                          <div className={`w-10 h-10 rounded-lg bg-white/5 overflow-hidden flex-shrink-0 border ${theme.border}`}>
                             {item.cover ? (
                               <img src={item.cover} alt="" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
-                                <Music size={16} className="text-white/10" />
+                                <Music size={16} className={`${theme.text} opacity-10`} />
                               </div>
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-white/80 truncate group-hover:text-orange-500 transition-colors">{item.songtitle}</p>
-                            <p className="text-[10px] text-white/40 truncate uppercase tracking-wider">{item.artist}</p>
+                            <p className={`text-xs font-medium ${theme.text} truncate group-hover:${theme.iconColor} transition-colors`}>{item.songtitle}</p>
+                            <p className={`text-[10px] ${theme.subtext} truncate uppercase tracking-wider`}>{item.artist}</p>
                           </div>
-                          <span className="text-[9px] text-white/20 font-mono">
+                          <span className={`text-[9px] ${theme.subtext} font-mono opacity-50`}>
                             {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       ))
                     ) : (
-                      <p className="text-[10px] text-white/20 italic">Nenhuma música no histórico ainda.</p>
+                      <p className={`text-[10px] ${theme.subtext} italic`}>Nenhuma música no histórico ainda.</p>
                     )}
                   </div>
                 </div>
@@ -664,12 +811,18 @@ export default function RadioPlayer() {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden mt-8 pt-8 border-t border-white/5"
+                className={`overflow-hidden mt-8 pt-8 border-t ${theme.border}`}
               >
-                <div className="bg-white/[0.02] rounded-2xl p-4 border border-white/5 backdrop-blur-md">
+                <div className={`${theme.card} bg-opacity-20 rounded-2xl p-5 border ${theme.border} backdrop-blur-md relative`}>
+                  <button 
+                    onClick={() => setShowLyrics(false)}
+                    className={`absolute top-4 right-4 ${theme.subtext} hover:${theme.text} transition-colors`}
+                  >
+                    <X size={16} />
+                  </button>
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Letra da Música</h3>
-                    {isLyricsLoading && <Loader2 size={12} className="animate-spin text-white/20" />}
+                    <h3 className={`text-[10px] uppercase tracking-[0.2em] font-bold ${theme.subtext}`}>Letra da Música</h3>
+                    {isLyricsLoading && <Loader2 size={12} className={`animate-spin ${theme.iconColor}`} />}
                   </div>
                   <div className="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
                     {isLyricsLoading ? (
@@ -679,11 +832,11 @@ export default function RadioPlayer() {
                         <div className="h-3 w-2/3 bg-white/5 rounded animate-pulse" />
                       </div>
                     ) : lyrics ? (
-                      <pre className="text-xs text-white/60 whitespace-pre-wrap font-sans leading-relaxed">
+                      <pre className={`text-xs ${theme.text} opacity-70 whitespace-pre-wrap font-sans leading-relaxed`}>
                         {lyrics}
                       </pre>
                     ) : (
-                      <p className="text-[10px] text-white/20 italic">Clique no ícone de letra para carregar.</p>
+                      <p className={`text-[10px] ${theme.subtext} italic`}>Clique no ícone de letra para carregar.</p>
                     )}
                   </div>
                 </div>
@@ -695,30 +848,30 @@ export default function RadioPlayer() {
         {/* Footer Info & Sponsored Links */}
         <div className="mt-8 space-y-6">
           <div className="space-y-4">
-            <h1 className="text-center text-[12px] uppercase tracking-[0.4em] font-black text-white">
+            <h1 className={`text-center text-[12px] uppercase tracking-[0.4em] font-black ${theme.text}`}>
               PARCEIROS
             </h1>
             
             <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-2 px-4">
-              <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo do bicho online</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://spotbichos.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">jogo do bicho online</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://kangaroohost.com.br/hospedagem-de-site" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Hospedagem de sites</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://foxsolucoes.com/streaming-de-audio" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Streaming de audio</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://coimbraendlich.com.br/advogado-online" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Advogado Online</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="http://casestarlink.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">CASER STARLINK</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://playbicho.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">Jogo Do Bicho</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://pontodobingo.com/" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">BINGO ONLINE</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://danferapida.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">danfe online</a>
-              <span className="text-white/20 text-[8px]">•</span>
-              <a href="https://hotelcity.com.br" target="_blank" rel="noopener noreferrer" className="text-[10px] text-white hover:text-white/70 transition-colors uppercase tracking-widest">HOTEL CITY</a>
+              <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Jogo do bicho online</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://spotbichos.com" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>jogo do bicho online</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://kangaroohost.com.br/hospedagem-de-site" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Hospedagem de sites</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://foxsolucoes.com/streaming-de-audio" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Streaming de audio</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://coimbraendlich.com.br/advogado-online" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Advogado Online</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="http://casestarlink.com.br" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>CASER STARLINK</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://playbicho.com" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Jogo Do Bicho</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://pontodobingo.com/" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>BINGO ONLINE</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://danferapida.com.br" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>danfe online</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://hotelcity.com.br" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>HOTEL CITY</a>
             </div>
           </div>
         </div>

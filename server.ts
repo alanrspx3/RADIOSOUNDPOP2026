@@ -20,9 +20,10 @@ async function startServer() {
   // API Proxy for Radio Metadata to bypass CORS and handle certificate issues
   app.get("/api/radio-stats", async (req, res) => {
     const endpoints = [
+      "https://streaming.fox.srv.br:2020/json/stream/8150",
       "https://streaming.fox.srv.br:8150/stats?json=1",
       "https://streaming.fox.srv.br:8150/status-json.xsl",
-      "http://streaming.fox.srv.br:8150/stats?json=1" // Try HTTP as fallback
+      "http://streaming.fox.srv.br:8150/stats?json=1"
     ];
 
     let lastError = null;
@@ -43,12 +44,20 @@ async function startServer() {
           const contentType = response.headers.get("content-type");
           if (contentType && contentType.includes("application/json")) {
             const data = await response.json();
+            
+            // Normalize the new endpoint format to be compatible with existing frontend logic
+            if (data.nowplaying && !data.songtitle) {
+              data.songtitle = data.nowplaying;
+            }
+            
             return res.json(data);
           } else {
             const text = await response.text();
-            // Try to parse text as JSON if it looks like it
             try {
               const data = JSON.parse(text);
+              if (data.nowplaying && !data.songtitle) {
+                data.songtitle = data.nowplaying;
+              }
               return res.json(data);
             } catch (e) {
               console.warn(`Endpoint ${url} returned non-JSON content:`, text.substring(0, 100));
@@ -87,6 +96,24 @@ async function startServer() {
       error: "Failed to fetch metadata from all sources", 
       details: lastError instanceof Error ? lastError.message : String(lastError) 
     });
+  });
+
+  // Proxy for Lyrics to bypass CORS
+  app.get("/api/lyrics", async (req, res) => {
+    const { artist, title } = req.query;
+    if (!artist || !title) {
+      return res.status(400).json({ error: "Artist and title are required" });
+    }
+
+    try {
+      const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist as string)}/${encodeURIComponent(title as string)}`;
+      const response = await fetch(url, { timeout: 5000 });
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Lyrics proxy error:", error);
+      res.status(500).json({ error: "Failed to fetch lyrics" });
+    }
   });
 
   // Vite middleware for development
