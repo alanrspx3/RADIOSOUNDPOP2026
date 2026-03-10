@@ -7,6 +7,14 @@ const STREAM_URL = 'https://streaming.fox.srv.br:8150/;';
 const METADATA_URL = 'https://streaming.fox.srv.br:2020/json/stream/8150';
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
+const CACHE_KEYS = {
+  METADATA: 'radio_metadata_cache',
+  LYRICS: 'radio_lyrics_cache',
+  THEME: 'radio_theme',
+  LIKED: 'radio_liked',
+  HISTORY: 'radio_history'
+};
+
 interface RadioMetadata {
   songtitle: string;
   artist?: string;
@@ -22,7 +30,7 @@ interface HistoryItem {
   timestamp: number;
 }
 
-type Theme = 'neon' | 'dark' | 'pastel' | 'ocean';
+type Theme = 'neon' | 'neon_soft' | 'dark' | 'pastel' | 'ocean';
 
 const themes: Record<Theme, {
   bg: string;
@@ -45,6 +53,17 @@ const themes: Record<Theme, {
     glow: 'shadow-[0_0_25px_rgba(249,115,22,0.4)]',
     name: 'Neon Vibrante',
     iconColor: 'text-orange-400'
+  },
+  neon_soft: {
+    bg: 'bg-[#0f0f12]',
+    card: 'bg-white/[0.03] backdrop-blur-2xl border-white/5',
+    accent: 'from-orange-500/70 to-rose-600/70',
+    text: 'text-zinc-200',
+    subtext: 'text-zinc-500',
+    border: 'border-white/10',
+    glow: 'shadow-[0_0_15px_rgba(249,115,22,0.2)]',
+    name: 'Neon Soft',
+    iconColor: 'text-orange-500/80'
   },
   dark: {
     bg: 'bg-[#050505]',
@@ -102,11 +121,20 @@ export default function RadioPlayer() {
   const [showLyrics, setShowLyrics] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<Theme>('neon');
+  const [isAutoTheme, setIsAutoTheme] = useState(false);
   const [showThemeSelector, setShowThemeSelector] = useState(false);
+  const [toast, setToast] = useState<{ message: string; icon?: React.ReactNode } | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const theme = themes[currentTheme];
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const showToast = (message: string, icon?: React.ReactNode) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, icon });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 2000);
+  };
 
   // Initialize Audio
   useEffect(() => {
@@ -177,12 +205,9 @@ export default function RadioPlayer() {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        // Use a CORS proxy to fetch directly from the radio server
-        // This avoids 404 errors if the backend API is not available (e.g. static hosting)
         const response = await fetch(`${CORS_PROXY}${encodeURIComponent(METADATA_URL)}`);
         const data = await response.json();
         
-        // Normalize the data format
         const songtitle = data.nowplaying || data.songtitle;
         
         if (songtitle) {
@@ -190,7 +215,6 @@ export default function RadioPlayer() {
           const songTitle = songParts.join(' - ') || songtitle;
           const artist = artistName || 'SoundPop';
 
-          // Use cover art from API if available, otherwise fetch from iTunes/Deezer
           let coverUrl = data.coverart || undefined;
           
           if (!coverUrl) {
@@ -202,7 +226,6 @@ export default function RadioPlayer() {
               if (itunesData.results && itunesData.results.length > 0) {
                 coverUrl = itunesData.results[0].artworkUrl100.replace('100x100', '600x600');
               } else {
-                // Fallback to Deezer
                 try {
                   const deezerRes = await fetch(`https://api.deezer.com/search?q=artist:"${artist}" track:"${songTitle}"&limit=1`);
                   const deezerData = await deezerRes.json();
@@ -218,18 +241,20 @@ export default function RadioPlayer() {
             }
           }
 
-          setMetadata({
+          const newMetadata: RadioMetadata = {
             songtitle: songTitle,
             artist: artist,
             status: 'online',
             cover: coverUrl
-          });
+          };
+
+          setMetadata(newMetadata);
+          localStorage.setItem(CACHE_KEYS.METADATA, JSON.stringify(newMetadata));
 
           // Reset lyrics when song changes
           setLyrics(null);
           setShowLyrics(false);
 
-          // Update History from API if available, otherwise use local logic
           if (data.trackhistory && Array.isArray(data.trackhistory)) {
             const apiHistory = data.trackhistory.map((item: string, index: number) => {
               const [hArtist, ...hSongParts] = item.split(' - ');
@@ -238,36 +263,55 @@ export default function RadioPlayer() {
                 songtitle: hSongTitle,
                 artist: hArtist || 'SoundPop',
                 cover: data.covers && data.covers[index] ? data.covers[index] : undefined,
-                timestamp: Date.now() - (index + 1) * 300000 // Approximate time
+                timestamp: Date.now() - (index + 1) * 300000
               };
             });
-            setHistory(apiHistory);
-            localStorage.setItem('radio_history', JSON.stringify(apiHistory));
+
+            // Ensure current song is at the top
+            const filteredApiHistory = apiHistory.filter(item => 
+              !(item.songtitle === songTitle && item.artist === artist)
+            );
+
+            const currentItem: HistoryItem = {
+              songtitle: songTitle,
+              artist: artist,
+              cover: coverUrl,
+              timestamp: Date.now()
+            };
+
+            const finalHistory = [currentItem, ...filteredApiHistory].slice(0, 10);
+            setHistory(finalHistory);
+            localStorage.setItem(CACHE_KEYS.HISTORY, JSON.stringify(finalHistory));
           } else {
             setHistory(prev => {
-              const lastItem = prev[0];
-              if (lastItem && lastItem.songtitle === songTitle && lastItem.artist === artist) {
+              // Check if song is already at the top to avoid unnecessary updates
+              if (prev[0] && prev[0].songtitle === songTitle && prev[0].artist === artist) {
                 return prev;
               }
+
+              // Remove the song if it exists elsewhere in the history
+              const filteredHistory = prev.filter(item => 
+                !(item.songtitle === songTitle && item.artist === artist)
+              );
+
               const newItem: HistoryItem = {
                 songtitle: songTitle,
                 artist: artist,
                 cover: coverUrl,
                 timestamp: Date.now()
               };
-              const updatedHistory = [newItem, ...prev].slice(0, 10);
-              localStorage.setItem('radio_history', JSON.stringify(updatedHistory));
+
+              const updatedHistory = [newItem, ...filteredHistory].slice(0, 10);
+              localStorage.setItem(CACHE_KEYS.HISTORY, JSON.stringify(updatedHistory));
               return updatedHistory;
             });
           }
         }
       } catch (error) {
         console.error('Metadata fetch error:', error);
-        // Fallback for demo purposes if CORS blocks direct access
-        // In production, you'd use a server-side proxy.
         setMetadata(prev => ({
           ...prev,
-          status: 'online', // Assume online if we can't fetch but stream might work
+          status: 'online',
           songtitle: 'Erro ao carregar metadados',
           artist: 'SoundPop'
         }));
@@ -296,15 +340,18 @@ export default function RadioPlayer() {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Like & History & Theme Persistence
+  // Like & History & Theme & Metadata Persistence
   useEffect(() => {
-    const savedLike = localStorage.getItem('radio_liked');
+    const savedLike = localStorage.getItem(CACHE_KEYS.LIKED);
     if (savedLike === 'true') setIsLiked(true);
 
-    const savedTheme = localStorage.getItem('radio_theme') as Theme;
+    const savedTheme = localStorage.getItem(CACHE_KEYS.THEME) as Theme;
     if (savedTheme && themes[savedTheme]) setCurrentTheme(savedTheme);
 
-    const savedHistory = localStorage.getItem('radio_history');
+    const savedAuto = localStorage.getItem('radio_auto_theme');
+    if (savedAuto === 'true') setIsAutoTheme(true);
+
+    const savedHistory = localStorage.getItem(CACHE_KEYS.HISTORY);
     if (savedHistory) {
       try {
         setHistory(JSON.parse(savedHistory));
@@ -312,18 +359,55 @@ export default function RadioPlayer() {
         console.error("Failed to parse history", e);
       }
     }
+
+    const savedMetadata = localStorage.getItem(CACHE_KEYS.METADATA);
+    if (savedMetadata) {
+      try {
+        setMetadata(JSON.parse(savedMetadata));
+      } catch (e) {
+        console.error("Failed to parse metadata cache", e);
+      }
+    }
   }, []);
+
+  // Auto Theme Logic
+  useEffect(() => {
+    if (!isAutoTheme) return;
+
+    const checkTheme = () => {
+      const hour = new Date().getHours();
+      // Between 20:00 and 06:00 use Neon Soft for long night sessions
+      if (hour >= 20 || hour < 6) {
+        if (currentTheme !== 'neon_soft') setCurrentTheme('neon_soft');
+      } else {
+        if (currentTheme !== 'neon') setCurrentTheme('neon');
+      }
+    };
+
+    checkTheme();
+    const interval = setInterval(checkTheme, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [isAutoTheme, currentTheme]);
 
   const toggleLike = () => {
     const newState = !isLiked;
     setIsLiked(newState);
-    localStorage.setItem('radio_liked', String(newState));
+    localStorage.setItem(CACHE_KEYS.LIKED, String(newState));
   };
 
   const changeTheme = (newTheme: Theme) => {
     setCurrentTheme(newTheme);
-    localStorage.setItem('radio_theme', newTheme);
+    setIsAutoTheme(false); // Disable auto when manually selecting
+    localStorage.setItem(CACHE_KEYS.THEME, newTheme);
+    localStorage.setItem('radio_auto_theme', 'false');
     setShowThemeSelector(false);
+  };
+
+  const toggleAutoTheme = () => {
+    const newState = !isAutoTheme;
+    setIsAutoTheme(newState);
+    localStorage.setItem('radio_auto_theme', String(newState));
+    showToast(newState ? 'Modo Automático Ativado' : 'Modo Automático Desativado', <Sparkles size={14} />);
   };
 
   const getAiInsight = async () => {
@@ -349,12 +433,47 @@ export default function RadioPlayer() {
     if (!metadata.songtitle || !metadata.artist || metadata.songtitle === 'Carregando...') return;
     
     setIsLyricsLoading(true);
+    const cacheKey = `${metadata.artist}-${metadata.songtitle}`.toLowerCase();
+    
+    // Check cache first
+    try {
+      const cachedLyrics = localStorage.getItem(CACHE_KEYS.LYRICS);
+      if (cachedLyrics) {
+        const lyricsMap = JSON.parse(cachedLyrics);
+        if (lyricsMap[cacheKey]) {
+          setLyrics(lyricsMap[cacheKey]);
+          setIsLyricsLoading(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Cache read error", e);
+    }
+
     try {
       const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`;
       const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
       const data = await response.json();
+      
       if (data.lyrics) {
         setLyrics(data.lyrics);
+        
+        // Save to cache
+        try {
+          const cachedLyrics = localStorage.getItem(CACHE_KEYS.LYRICS);
+          const lyricsMap = cachedLyrics ? JSON.parse(cachedLyrics) : {};
+          lyricsMap[cacheKey] = data.lyrics;
+          
+          // Limit cache size (keep last 20 lyrics)
+          const keys = Object.keys(lyricsMap);
+          if (keys.length > 20) {
+            delete lyricsMap[keys[0]];
+          }
+          
+          localStorage.setItem(CACHE_KEYS.LYRICS, JSON.stringify(lyricsMap));
+        } catch (e) {
+          console.error("Cache write error", e);
+        }
       } else {
         setLyrics("Letra não encontrada para esta música. 😕");
       }
@@ -368,25 +487,7 @@ export default function RadioPlayer() {
 
   return (
     <div className={`min-h-screen flex items-center justify-center p-6 ${theme.bg} transition-colors duration-700 overflow-hidden relative`}>
-      {/* Atmospheric Background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div 
-          animate={isPlaying ? {
-            scale: [1, 1.2, 1],
-            opacity: [0.1, 0.3, 0.1]
-          } : {}}
-          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          className={`absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full ${currentTheme === 'pastel' ? 'bg-purple-200/30' : currentTheme === 'ocean' ? 'bg-cyan-600/20' : 'bg-orange-600/20'} blur-[120px]`} 
-        />
-        <motion.div 
-          animate={isPlaying ? {
-            scale: [1, 1.1, 1],
-            opacity: [0.1, 0.2, 0.1]
-          } : {}}
-          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full ${currentTheme === 'pastel' ? 'bg-pink-200/30' : currentTheme === 'ocean' ? 'bg-blue-900/20' : 'bg-purple-900/20'} blur-[100px]`} 
-        />
-      </div>
+      {/* Atmospheric Background Removed */}
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -404,9 +505,19 @@ export default function RadioPlayer() {
             >
               <div className="flex justify-between items-center mb-4">
                 <h3 className={`text-xs font-bold uppercase tracking-widest ${theme.text}`}>Escolha o Tema</h3>
-                <button onClick={() => setShowThemeSelector(false)} className={`${theme.subtext} hover:${theme.text}`}>
-                  <X size={16} />
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={toggleAutoTheme}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-bold transition-all ${isAutoTheme ? `bg-gradient-to-r ${theme.accent} text-white` : `bg-white/5 ${theme.subtext}`}`}
+                    title="Troca automática baseada no horário"
+                  >
+                    <Sparkles size={10} />
+                    AUTO
+                  </button>
+                  <button onClick={() => setShowThemeSelector(false)} className={`${theme.subtext} hover:${theme.text}`}>
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {(Object.keys(themes) as Theme[]).map((tKey) => (
@@ -415,7 +526,7 @@ export default function RadioPlayer() {
                     onClick={() => changeTheme(tKey)}
                     className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${
                       currentTheme === tKey 
-                        ? `bg-white/10 ${theme.border} ${currentTheme === 'neon' ? 'shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}` 
+                        ? `bg-white/10 ${theme.border} ${currentTheme.startsWith('neon') ? 'shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}` 
                         : `bg-transparent border-transparent hover:bg-white/5`
                     }`}
                   >
@@ -430,14 +541,6 @@ export default function RadioPlayer() {
 
         {/* Player Card */}
         <motion.div 
-          animate={isPlaying ? {
-            boxShadow: currentTheme === 'dark' ? 'none' : [
-              currentTheme === 'neon' ? "0 0 30px rgba(249, 115, 22, 0.1)" : "0 0 20px rgba(249, 115, 22, 0.05)",
-              currentTheme === 'neon' ? "0 0 60px rgba(249, 115, 22, 0.2)" : "0 0 40px rgba(249, 115, 22, 0.1)",
-              currentTheme === 'neon' ? "0 0 30px rgba(249, 115, 22, 0.1)" : "0 0 20px rgba(249, 115, 22, 0.05)"
-            ]
-          } : {}}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           className={`${theme.card} border ${theme.border} rounded-[2.5rem] p-8 shadow-2xl transition-all duration-500`}
         >
           
@@ -475,18 +578,7 @@ export default function RadioPlayer() {
 
           {/* Album Art / Visualizer */}
           <div className="relative aspect-square mb-8 group">
-            {/* Neon Pulse Ring */}
-            {isPlaying && currentTheme !== 'dark' && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ 
-                  opacity: currentTheme === 'neon' ? [0.2, 0.5, 0.2] : [0.1, 0.3, 0.1],
-                  scale: [1, 1.05, 1],
-                }}
-                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                className={`absolute -inset-4 rounded-[2.5rem] border-2 ${currentTheme === 'neon' ? 'border-orange-500/40' : theme.border} blur-md pointer-events-none`}
-              />
-            )}
+            {/* Neon Pulse Ring Removed */}
             <div className={`absolute inset-0 bg-gradient-to-br ${theme.accent} opacity-20 rounded-3xl overflow-hidden shadow-2xl border ${theme.border}`}>
               <AnimatePresence mode="wait">
                 <motion.div 
@@ -601,7 +693,7 @@ export default function RadioPlayer() {
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className={`absolute top-full left-0 right-0 mt-4 p-4 ${theme.card} border ${theme.border} rounded-2xl text-xs ${theme.text} opacity-90 leading-relaxed shadow-xl z-20 ${currentTheme === 'neon' ? theme.glow : ''}`}
+                  className={`absolute top-full left-0 right-0 mt-4 p-4 ${theme.card} border ${theme.border} rounded-2xl text-xs ${theme.text} opacity-90 leading-relaxed shadow-xl z-20 ${currentTheme.startsWith('neon') ? theme.glow : ''}`}
                 >
                   <button 
                     onClick={() => setAiInsight(null)}
@@ -633,7 +725,7 @@ export default function RadioPlayer() {
 
           {/* Progress Bar */}
           <div className="mb-8 px-2">
-            <div className={`h-1.5 w-full ${currentTheme === 'neon' ? 'bg-white/10' : 'bg-white/5'} rounded-full overflow-hidden`}>
+            <div className={`h-1.5 w-full ${currentTheme.startsWith('neon') ? 'bg-white/10' : 'bg-white/5'} rounded-full overflow-hidden`}>
               <motion.div 
                 className={`h-full bg-gradient-to-r ${theme.accent} ${theme.glow}`}
                 animate={{ width: `${progress}%` }}
@@ -676,7 +768,11 @@ export default function RadioPlayer() {
           {/* Controls */}
           <div className="flex items-center gap-6 mb-8">
             <button 
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={() => {
+                const nextMuted = !isMuted;
+                setIsMuted(nextMuted);
+                showToast(nextMuted ? 'Mudo' : 'Som Ativado', nextMuted ? <VolumeX size={14} /> : <Volume2 size={14} />);
+              }}
               className={`${theme.subtext} hover:${theme.text} transition-colors`}
             >
               {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
@@ -688,10 +784,15 @@ export default function RadioPlayer() {
                 min="0"
                 max="100"
                 value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setVolume(val);
+                  if (val > 0 && isMuted) setIsMuted(false);
+                  showToast(`Volume: ${val}%`, val === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />);
+                }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               />
-              <div className={`absolute inset-0 ${currentTheme === 'neon' ? 'bg-white/10' : 'bg-white/5'} rounded-full`} />
+              <div className={`absolute inset-0 ${currentTheme.startsWith('neon') ? 'bg-white/10' : 'bg-white/5'} rounded-full`} />
               <div 
                 className={`absolute inset-y-0 left-0 bg-gradient-to-r ${theme.accent} rounded-full transition-all`}
                 style={{ width: `${volume}%` }}
@@ -851,9 +952,9 @@ export default function RadioPlayer() {
         {/* Footer Info & Sponsored Links */}
         <div className="mt-8 space-y-6">
           <div className="space-y-4">
-            <h1 className={`text-center text-[12px] uppercase tracking-[0.4em] font-black ${theme.text}`}>
+            <p className={`text-center text-[12px] uppercase tracking-[0.4em] font-black ${theme.text}`}>
               PARCEIROS
-            </h1>
+            </p>
             
             <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-2 px-4">
               <a href="https://pontodobicho.com/jogo-do-bicho" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Jogo do bicho online</a>
@@ -879,6 +980,25 @@ export default function RadioPlayer() {
           </div>
         </div>
       </motion.div>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.9 }}
+            className={`fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full ${theme.card} border ${theme.border} ${theme.glow} flex items-center gap-3 backdrop-blur-2xl`}
+          >
+            <div className={theme.iconColor}>
+              {toast.icon}
+            </div>
+            <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${theme.text}`}>
+              {toast.message}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
