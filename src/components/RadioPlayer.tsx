@@ -120,8 +120,20 @@ export default function RadioPlayer() {
   const [lyrics, setLyrics] = useState<string | null>(null);
   const [showLyrics, setShowLyrics] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
-  const [currentTheme, setCurrentTheme] = useState<Theme>('neon');
-  const [isAutoTheme, setIsAutoTheme] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') return 'neon';
+    const savedAuto = localStorage.getItem('radio_auto_theme') === 'true';
+    if (savedAuto) {
+      const hour = new Date().getHours();
+      return (hour >= 20 || hour < 6) ? 'neon_soft' : 'neon';
+    }
+    const saved = localStorage.getItem(CACHE_KEYS.THEME);
+    return (saved && themes[saved as Theme]) ? (saved as Theme) : 'neon';
+  });
+  const [isAutoTheme, setIsAutoTheme] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('radio_auto_theme') === 'true';
+  });
   const [showThemeSelector, setShowThemeSelector] = useState(false);
   const [toast, setToast] = useState<{ message: string; icon?: React.ReactNode } | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -340,16 +352,10 @@ export default function RadioPlayer() {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Like & History & Theme & Metadata Persistence
+  // Like & History & Metadata Persistence
   useEffect(() => {
     const savedLike = localStorage.getItem(CACHE_KEYS.LIKED);
     if (savedLike === 'true') setIsLiked(true);
-
-    const savedTheme = localStorage.getItem(CACHE_KEYS.THEME) as Theme;
-    if (savedTheme && themes[savedTheme]) setCurrentTheme(savedTheme);
-
-    const savedAuto = localStorage.getItem('radio_auto_theme');
-    if (savedAuto === 'true') setIsAutoTheme(true);
 
     const savedHistory = localStorage.getItem(CACHE_KEYS.HISTORY);
     if (savedHistory) {
