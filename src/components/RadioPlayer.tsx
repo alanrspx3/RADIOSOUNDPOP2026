@@ -5,7 +5,40 @@ import { GoogleGenAI } from "@google/genai";
 
 const STREAM_URL = 'https://streaming.fox.srv.br:8150/;';
 const METADATA_URL = 'https://streaming.fox.srv.br:2020/json/stream/8150';
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+const PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://api.codetabs.com/v1/proxy?quest='
+];
+
+const fetchWithFallback = async (url: string) => {
+  let lastError;
+  
+  // Try direct fetch first (no proxy)
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(3000) // Fast check for direct access
+    });
+    if (response.ok) return await response.json();
+  } catch (e) {
+    console.warn("Direct fetch failed, trying proxies...");
+  }
+
+  for (const proxy of PROXIES) {
+    try {
+      const response = await fetch(`${proxy}${encodeURIComponent(url)}`, {
+        signal: AbortSignal.timeout(10000) // Increased to 10 seconds
+      });
+      if (response.ok) return await response.json();
+    } catch (e) {
+      lastError = e;
+      console.warn(`Proxy ${proxy} failed or timed out, trying next...`);
+      continue;
+    }
+  }
+  throw lastError || new Error('All fetch attempts failed');
+};
 
 const CACHE_KEYS = {
   METADATA: 'radio_metadata_cache',
@@ -79,23 +112,23 @@ const themes: Record<Theme, {
   pastel: {
     bg: 'bg-[#fdfcf0]',
     card: 'bg-white/80 backdrop-blur-md border-purple-100',
-    accent: 'from-purple-300 to-pink-300',
+    accent: 'from-purple-400 to-pink-400',
     text: 'text-purple-900',
-    subtext: 'text-purple-400',
-    border: 'border-purple-100',
+    subtext: 'text-purple-600/60',
+    border: 'border-purple-200',
     glow: 'shadow-[0_10px_30px_rgba(216,180,254,0.3)]',
     name: 'Pastel',
-    iconColor: 'text-purple-400'
+    iconColor: 'text-purple-500'
   },
   ocean: {
     bg: 'bg-[#001219]',
     card: 'bg-white/[0.05] backdrop-blur-2xl border-cyan-900/30',
     accent: 'from-cyan-400 to-blue-500',
     text: 'text-cyan-50',
-    subtext: 'text-cyan-800/60',
+    subtext: 'text-cyan-400/50',
     border: 'border-cyan-900/30',
     glow: 'shadow-[0_0_25px_rgba(34,211,238,0.15)]',
-    name: 'Ocean',
+    name: 'Oceano',
     iconColor: 'text-cyan-400'
   }
 };
@@ -118,6 +151,9 @@ export default function RadioPlayer() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [lyrics, setLyrics] = useState<string | null>(null);
+  const [translatedLyrics, setTranslatedLyrics] = useState<string | null>(null);
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<Theme>(() => {
@@ -125,7 +161,10 @@ export default function RadioPlayer() {
     const savedAuto = localStorage.getItem('radio_auto_theme') === 'true';
     if (savedAuto) {
       const hour = new Date().getHours();
-      return (hour >= 20 || hour < 6) ? 'neon_soft' : 'neon';
+      if (hour >= 6 && hour < 12) return 'pastel';
+      if (hour >= 12 && hour < 18) return 'ocean';
+      if (hour >= 18 && hour < 22) return 'neon';
+      return 'dark';
     }
     const saved = localStorage.getItem(CACHE_KEYS.THEME);
     return (saved && themes[saved as Theme]) ? (saved as Theme) : 'neon';
@@ -217,8 +256,7 @@ export default function RadioPlayer() {
   useEffect(() => {
     const fetchMetadata = async () => {
       try {
-        const response = await fetch(`${CORS_PROXY}${encodeURIComponent(METADATA_URL)}`);
-        const data = await response.json();
+        const data = await fetchWithFallback(METADATA_URL);
         
         const songtitle = data.nowplaying || data.songtitle;
         
@@ -236,13 +274,39 @@ export default function RadioPlayer() {
               const itunesData = await itunesRes.json();
               
               if (itunesData.results && itunesData.results.length > 0) {
-                coverUrl = itunesData.results[0].artworkUrl100.replace('100x100', '600x600');
+                const result = itunesData.results[0];
+                const baseUrl = result.artworkUrl100;
+                
+                // Try to get the highest resolution possible from iTunes
+                // We'll try 1000x1000, then 600x600, then fallback to original
+                const trySizes = ['1000x1000', '600x600', '400x400'];
+                let foundHighRes = false;
+                
+                for (const size of trySizes) {
+                  const testUrl = baseUrl.replace('100x100', size);
+                  try {
+                    const check = await fetch(testUrl, { method: 'HEAD', mode: 'no-cors' });
+                    // Note: no-cors won't let us see res.ok, but if it doesn't throw, it's likely fine
+                    // or we just assume it works as iTunes is very consistent with these patterns
+                    coverUrl = testUrl;
+                    foundHighRes = true;
+                    break;
+                  } catch (e) {
+                    continue;
+                  }
+                }
+                
+                if (!foundHighRes) {
+                  coverUrl = baseUrl.replace('100x100', '600x600');
+                }
               } else {
                 try {
                   const deezerRes = await fetch(`https://api.deezer.com/search?q=artist:"${artist}" track:"${songTitle}"&limit=1`);
                   const deezerData = await deezerRes.json();
                   if (deezerData.data && deezerData.data.length > 0) {
-                    coverUrl = deezerData.data[0].album.cover_xl;
+                    const track = deezerData.data[0];
+                    // Prioritize XL, then Big, then Medium
+                    coverUrl = track.album.cover_xl || track.album.cover_big || track.album.cover_medium;
                   }
                 } catch (de) {
                   console.log('Deezer fallback failed');
@@ -265,7 +329,9 @@ export default function RadioPlayer() {
 
           // Reset lyrics when song changes
           setLyrics(null);
+          setTranslatedLyrics(null);
           setShowLyrics(false);
+          setShowTranslation(false);
 
           if (data.trackhistory && Array.isArray(data.trackhistory)) {
             const apiHistory = data.trackhistory.map((item: string, index: number) => {
@@ -291,7 +357,7 @@ export default function RadioPlayer() {
               timestamp: Date.now()
             };
 
-            const finalHistory = [currentItem, ...filteredApiHistory].slice(0, 10);
+            const finalHistory = [currentItem, ...filteredApiHistory].slice(0, 15);
             setHistory(finalHistory);
             localStorage.setItem(CACHE_KEYS.HISTORY, JSON.stringify(finalHistory));
           } else {
@@ -313,7 +379,7 @@ export default function RadioPlayer() {
                 timestamp: Date.now()
               };
 
-              const updatedHistory = [newItem, ...filteredHistory].slice(0, 10);
+              const updatedHistory = [newItem, ...filteredHistory].slice(0, 15);
               localStorage.setItem(CACHE_KEYS.HISTORY, JSON.stringify(updatedHistory));
               return updatedHistory;
             });
@@ -382,11 +448,15 @@ export default function RadioPlayer() {
 
     const checkTheme = () => {
       const hour = new Date().getHours();
-      // Between 20:00 and 06:00 use Neon Soft for long night sessions
-      if (hour >= 20 || hour < 6) {
-        if (currentTheme !== 'neon_soft') setCurrentTheme('neon_soft');
-      } else {
-        if (currentTheme !== 'neon') setCurrentTheme('neon');
+      let targetTheme: Theme = 'neon';
+      
+      if (hour >= 6 && hour < 12) targetTheme = 'pastel';
+      else if (hour >= 12 && hour < 18) targetTheme = 'ocean';
+      else if (hour >= 18 && hour < 22) targetTheme = 'neon';
+      else targetTheme = 'dark';
+
+      if (currentTheme !== targetTheme) {
+        setCurrentTheme(targetTheme);
       }
     };
 
@@ -439,8 +509,42 @@ export default function RadioPlayer() {
     if (!metadata.songtitle || !metadata.artist || metadata.songtitle === 'Carregando...') return;
     
     setIsLyricsLoading(true);
+    setTranslatedLyrics(null);
+    setShowTranslation(false);
     const cacheKey = `${metadata.artist}-${metadata.songtitle}`.toLowerCase();
     
+    const saveToCache = (key: string, lyricsData: string) => {
+      try {
+        const cachedLyrics = localStorage.getItem(CACHE_KEYS.LYRICS);
+        const lyricsMap = cachedLyrics ? JSON.parse(cachedLyrics) : {};
+        lyricsMap[key] = lyricsData;
+        const keys = Object.keys(lyricsMap);
+        if (keys.length > 20) delete lyricsMap[keys[0]];
+        localStorage.setItem(CACHE_KEYS.LYRICS, JSON.stringify(lyricsMap));
+      } catch (e) {
+        console.error("Cache write error", e);
+      }
+    };
+
+    const fetchWithGemini = async () => {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `Encontre a letra completa da música "${metadata.songtitle}" do artista "${metadata.artist}". Retorne APENAS a letra, sem introduções ou conclusões. Se não encontrar, retorne exatamente "NOT_FOUND".`,
+        });
+        const text = response.text?.trim();
+        if (text && text !== "NOT_FOUND" && text.length > 20) {
+          setLyrics(text);
+          saveToCache(cacheKey, text);
+          return true;
+        }
+      } catch (e) {
+        console.error("Gemini lyrics fallback error:", e);
+      }
+      return false;
+    };
+
     // Check cache first
     try {
       const cachedLyrics = localStorage.getItem(CACHE_KEYS.LYRICS);
@@ -458,36 +562,45 @@ export default function RadioPlayer() {
 
     try {
       const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(metadata.artist)}/${encodeURIComponent(metadata.songtitle)}`;
-      const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
-      const data = await response.json();
+      const data = await fetchWithFallback(url);
       
       if (data.lyrics) {
         setLyrics(data.lyrics);
-        
-        // Save to cache
-        try {
-          const cachedLyrics = localStorage.getItem(CACHE_KEYS.LYRICS);
-          const lyricsMap = cachedLyrics ? JSON.parse(cachedLyrics) : {};
-          lyricsMap[cacheKey] = data.lyrics;
-          
-          // Limit cache size (keep last 20 lyrics)
-          const keys = Object.keys(lyricsMap);
-          if (keys.length > 20) {
-            delete lyricsMap[keys[0]];
-          }
-          
-          localStorage.setItem(CACHE_KEYS.LYRICS, JSON.stringify(lyricsMap));
-        } catch (e) {
-          console.error("Cache write error", e);
-        }
+        saveToCache(cacheKey, data.lyrics);
       } else {
-        setLyrics("Letra não encontrada para esta música. 😕");
+        const success = await fetchWithGemini();
+        if (!success) setLyrics("Letra não encontrada para esta música. 😕");
       }
     } catch (error) {
       console.error("Lyrics fetch error:", error);
-      setLyrics("Erro ao carregar a letra. Tente novamente mais tarde. 🛠️");
+      const success = await fetchWithGemini();
+      if (!success) setLyrics("Erro ao carregar a letra. Tente novamente mais tarde. 🛠️");
     } finally {
       setIsLyricsLoading(false);
+    }
+  };
+
+  const translateLyrics = async () => {
+    if (!lyrics || lyrics.startsWith('Letra não encontrada') || lyrics.startsWith('Erro ao carregar')) return;
+    if (translatedLyrics) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+    
+    setIsTranslating(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Traduza a seguinte letra de música para o português brasileiro. Mantenha a formatação original (quebras de linha). Se a letra já estiver em português, apenas retorne a letra original. Letra:\n\n${lyrics}`,
+      });
+      setTranslatedLyrics(response.text || "Não consegui traduzir agora. 🎵");
+      setShowTranslation(true);
+    } catch (error) {
+      console.error("Translation error:", error);
+      showToast("Erro ao traduzir letra", <X size={14} />);
+    } finally {
+      setIsTranslating(false);
     }
   };
 
@@ -883,7 +996,7 @@ export default function RadioPlayer() {
               >
                 <div className={`${theme.card} bg-opacity-20 rounded-2xl p-4 border ${theme.border} backdrop-blur-md`}>
                   <h3 className={`text-[10px] uppercase tracking-[0.2em] font-bold ${theme.subtext} mb-4`}>Tocadas Recentemente</h3>
-                  <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">
                     {history.length > 0 ? (
                       history.map((item, index) => (
                         <div key={item.timestamp + index} className="flex items-center gap-3 group">
@@ -931,7 +1044,19 @@ export default function RadioPlayer() {
                     <X size={16} />
                   </button>
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className={`text-[10px] uppercase tracking-[0.2em] font-bold ${theme.subtext}`}>Letra da Música</h3>
+                    <div className="flex items-center gap-3">
+                      <h3 className={`text-[10px] uppercase tracking-[0.2em] font-bold ${theme.subtext}`}>Letra da Música</h3>
+                      {lyrics && !lyrics.startsWith('Letra não encontrada') && !lyrics.startsWith('Erro ao carregar') && (
+                        <button 
+                          onClick={translateLyrics}
+                          disabled={isTranslating}
+                          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold transition-all ${showTranslation ? `bg-gradient-to-r ${theme.accent} text-white` : `bg-white/5 ${theme.subtext} hover:bg-white/10`}`}
+                        >
+                          {isTranslating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                          TRADUÇÃO
+                        </button>
+                      )}
+                    </div>
                     {isLyricsLoading && <Loader2 size={12} className={`animate-spin ${theme.iconColor}`} />}
                   </div>
                   <div className="max-h-64 overflow-y-auto pr-2 custom-scrollbar">
@@ -941,8 +1066,12 @@ export default function RadioPlayer() {
                         <div className="h-3 w-1/2 bg-white/5 rounded animate-pulse" />
                         <div className="h-3 w-2/3 bg-white/5 rounded animate-pulse" />
                       </div>
+                    ) : (showTranslation && translatedLyrics) ? (
+                      <pre className={`text-xs ${theme.text} opacity-70 whitespace-pre-wrap font-sans leading-relaxed animate-in fade-in duration-500`}>
+                        {translatedLyrics}
+                      </pre>
                     ) : lyrics ? (
-                      <pre className={`text-xs ${theme.text} opacity-70 whitespace-pre-wrap font-sans leading-relaxed`}>
+                      <pre className={`text-xs ${theme.text} opacity-70 whitespace-pre-wrap font-sans leading-relaxed animate-in fade-in duration-500`}>
                         {lyrics}
                       </pre>
                     ) : (
