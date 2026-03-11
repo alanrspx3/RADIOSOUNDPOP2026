@@ -180,6 +180,11 @@ export default function RadioPlayer() {
   const theme = themes[currentTheme];
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   const showToast = (message: string, icon?: React.ReactNode) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -190,6 +195,7 @@ export default function RadioPlayer() {
   // Initialize Audio
   useEffect(() => {
     audioRef.current = new Audio(STREAM_URL);
+    audioRef.current.crossOrigin = "anonymous";
     audioRef.current.volume = volume / 100;
     
     const handleCanPlay = () => setIsLoading(false);
@@ -228,9 +234,88 @@ export default function RadioPlayer() {
     };
   }, []);
 
+  // Visualizer Animation
+  useEffect(() => {
+    if (!isPlaying || !analyserRef.current || !canvasRef.current) {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const analyser = analyserRef.current;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      animationFrameRef.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      const barWidth = (width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = (dataArray[i] / 255) * height;
+
+        // Use theme colors for the visualizer
+        const gradient = ctx.createLinearGradient(0, height, 0, 0);
+        if (currentTheme === 'pastel') {
+          gradient.addColorStop(0, '#d8b4fe');
+          gradient.addColorStop(1, '#f9a8d4');
+        } else if (currentTheme === 'ocean') {
+          gradient.addColorStop(0, '#22d3ee');
+          gradient.addColorStop(1, '#3b82f6');
+        } else if (currentTheme === 'dark') {
+          gradient.addColorStop(0, '#52525b');
+          gradient.addColorStop(1, '#a1a1aa');
+        } else {
+          gradient.addColorStop(0, '#f97316');
+          gradient.addColorStop(1, '#e11d48');
+        }
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+
+        x += barWidth + 1;
+      }
+    };
+
+    draw();
+    return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    };
+  }, [isPlaying, currentTheme]);
+
   // Handle Play/Pause
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!audioRef.current) return;
+
+    // Initialize Audio Context on first play
+    if (!audioContextRef.current) {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        audioContextRef.current = new AudioContextClass();
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 64; // Smaller for simple equalizer
+        
+        sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+        sourceRef.current.connect(analyserRef.current);
+        analyserRef.current.connect(audioContextRef.current.destination);
+      } catch (e) {
+        console.error("Audio Context initialization failed:", e);
+      }
+    }
+
+    if (audioContextRef.current?.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
 
     if (isPlaying) {
       audioRef.current.pause();
@@ -699,8 +784,14 @@ export default function RadioPlayer() {
 
           {/* Album Art / Visualizer */}
           <div className="relative aspect-square mb-8 group">
-            {/* Neon Pulse Ring Removed */}
             <div className={`absolute inset-0 bg-gradient-to-br ${theme.accent} opacity-20 rounded-3xl overflow-hidden shadow-2xl border ${theme.border}`}>
+              {/* Visualizer Canvas */}
+              <canvas 
+                ref={canvasRef}
+                className="absolute inset-x-0 bottom-0 w-full h-1/2 z-10 pointer-events-none opacity-40"
+                width={400}
+                height={200}
+              />
               <AnimatePresence mode="wait">
                 <motion.div 
                   key={metadata.songtitle}
