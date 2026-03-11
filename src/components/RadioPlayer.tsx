@@ -362,35 +362,15 @@ export default function RadioPlayer() {
                 const result = itunesData.results[0];
                 const baseUrl = result.artworkUrl100;
                 
-                // Try to get the highest resolution possible from iTunes
-                // We'll try 1000x1000, then 600x600, then fallback to original
-                const trySizes = ['1000x1000', '600x600', '400x400'];
-                let foundHighRes = false;
-                
-                for (const size of trySizes) {
-                  const testUrl = baseUrl.replace('100x100', size);
-                  try {
-                    const check = await fetch(testUrl, { method: 'HEAD', mode: 'no-cors' });
-                    // Note: no-cors won't let us see res.ok, but if it doesn't throw, it's likely fine
-                    // or we just assume it works as iTunes is very consistent with these patterns
-                    coverUrl = testUrl;
-                    foundHighRes = true;
-                    break;
-                  } catch (e) {
-                    continue;
-                  }
-                }
-                
-                if (!foundHighRes) {
-                  coverUrl = baseUrl.replace('100x100', '600x600');
-                }
+                // iTunes artwork URL pattern is very predictable. 
+                // Replacing 100x100 with 1000x1000bb usually works for highest quality.
+                coverUrl = baseUrl.replace('100x100', '1000x1000bb');
               } else {
                 try {
                   const deezerRes = await fetch(`https://api.deezer.com/search?q=artist:"${artist}" track:"${songTitle}"&limit=1`);
                   const deezerData = await deezerRes.json();
                   if (deezerData.data && deezerData.data.length > 0) {
                     const track = deezerData.data[0];
-                    // Prioritize XL, then Big, then Medium
                     coverUrl = track.album.cover_xl || track.album.cover_big || track.album.cover_medium;
                   }
                 } catch (de) {
@@ -784,7 +764,26 @@ export default function RadioPlayer() {
 
           {/* Album Art / Visualizer */}
           <div className="relative aspect-square mb-8 group">
-            <div className={`absolute inset-0 bg-gradient-to-br ${theme.accent} opacity-20 rounded-3xl overflow-hidden shadow-2xl border ${theme.border}`}>
+            {/* Background Glow based on Cover */}
+            <AnimatePresence>
+              {metadata.cover && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 0.4 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute -inset-4 blur-3xl rounded-full z-0 overflow-hidden"
+                >
+                  <img 
+                    src={metadata.cover} 
+                    alt="" 
+                    className="w-full h-full object-cover scale-150"
+                    referrerPolicy="no-referrer"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className={`absolute inset-0 z-10 bg-white/[0.03] backdrop-blur-[2px] rounded-3xl overflow-hidden shadow-2xl border ${theme.border}`}>
               {/* Visualizer Canvas */}
               <canvas 
                 ref={canvasRef}
@@ -801,10 +800,18 @@ export default function RadioPlayer() {
                   className="w-full h-full flex items-center justify-center bg-black/20"
                 >
                   {metadata.cover ? (
-                    <img 
+                    <motion.img 
                       src={metadata.cover} 
                       alt={metadata.songtitle}
                       className="w-full h-full object-cover"
+                      animate={isPlaying ? {
+                        scale: [1, 1.02, 1],
+                      } : { scale: 1 }}
+                      transition={{
+                        duration: 4,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
                       referrerPolicy="no-referrer"
                       onError={(e) => {
                         setMetadata(prev => ({ ...prev, cover: undefined }));
