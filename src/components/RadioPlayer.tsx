@@ -1211,6 +1211,8 @@ export default function RadioPlayer() {
               <a href="https://hotelcity.com.br" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>HOTEL CITY</a>
               <span className={`${theme.subtext} text-[8px]`}>•</span>
               <a href="https://puxabicho.com" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Puxa Bicho</a>
+              <span className={`${theme.subtext} text-[8px]`}>•</span>
+              <a href="https://palpitesdobichohoje.com" target="_blank" rel="noopener noreferrer" className={`text-[10px] ${theme.text} hover:opacity-70 transition-colors uppercase tracking-widest`}>Palpites do Bicho</a>
             </div>
           </div>
         </div>
